@@ -15,6 +15,7 @@ global G; % global to be accessed inside functions
 G = cartGrid(dims, gridsize);
 G = computeGeometry(G);
 
+[ii, jj, kk] = gridLogicalIndices(G);
 x = G.cells.centroids(:,1);
 z = G.cells.centroids(:,3);
 
@@ -52,10 +53,10 @@ T = computeTrans(G, rock, 'Verbose', true);
 fluid = initSimpleADIFluid('phases', 'WO', ... % [water, GAS] or OIL?
                            'mu', [1, 0.015]*centi*poise, ... % viscosity
                            'n',  [2, 2], ... % relperm powers
-                           'rho', [1000, 2]*kilogram/meter^3); % densities: [water, CO2]                 
+                           'rho', [1000, 2]*kilogram/meter^3); % densities: [water, CO2]                                                          
 
 %% Horizontal well
-rate = 5*meter^3/day;
+rate = 7*meter^3/day; % 7
 % Put well slightly above bottom to avoid it interacting with bottom BC
 perforation_idx = G.cells.indexMap(z == max(z)-lz/nz & x < 10);
 W = addWell([], G, rock, perforation_idx, ...
@@ -64,11 +65,7 @@ W = addWell([], G, rock, perforation_idx, ...
             'Radius', 0.1, 'Dir', 'x', ...
             'Comp_i', [0, 1], 'Sign', 1, ... % inject CO2
             'Name', 'P1');
-%W = verticalWell([], G, rock, fix(nx/2), 1, linspace(nz, nz-3, 4), ...
-%                 'InnerProduct', 'ip_tpf', ...
-%                 'Type', 'rate', 'Val', rate, ...
-%                 'Radius', 0.1*meter, 'Name', 'I_bot', ...
-%                 'Comp_i', [0 1], 'Sign', 1); % [0 1] composition => co2
+
 %W.lims.bhp = 1*barsa;
 %% Plot grid
 % Map to associated faces
@@ -100,12 +97,10 @@ disp(model)
 %% Boundary conditions and schedule
 bc = []; % no-flux as default
 %bc = fluxside(bc, G, 'EAST', -10*meter^3/day, 'sat', [0 1]); % open right boundary (minus for fluc to be OUT)
-bc = pside(bc, G, 'EAST', 10*barsa, 'sat', [0 1]);
-%bc = pside(bc, G, 'Top', 10*barsa, 'sat', [1 0]);
-%bc = pside(bc, G, 'Bottom', 10*barsa, 'sat', [1 0]);
-%bc = pside(bc, G, 'WEST', 10*barsa, 'sat', [1 0]);
+pz = fluid.rhoWS * norm(gravity) * uniquetol(z); % hydrostatic pressure (uniquetol necessary to avoid some duplicates by round-off)
+bc = pside(bc, G, 'EAST', pz, 'sat', [1 0]); % 10 barsa
 
-tot_time = 800*day();
+tot_time = 800*day(); % 200 days
 n_steps = 50;
 dt = repmat(tot_time/n_steps, [n_steps, 1]);
 
@@ -114,6 +109,7 @@ schedule = simpleSchedule(dt, 'W', W, 'bc', bc);
 %% Initial condition
 state = initResSol(G, 0*barsa, [1,0]);
 t = 0;
+p_mean = zeros(max(kk), n_steps);
 
 f2 = figure(2); % to hold saturations
 
@@ -128,6 +124,19 @@ drawnow
 
 saveas(f2, 'summer_sintef/case1/plots/sat_0', 'png');
 
+f3 = figure(3); % to plot pressure
+
+plotFaces(G, imperm_faces(:), 'FaceColor', 'none', 'EdgeColor', 'red', 'Linewidth', 1.5);
+plotCellData(G, state.pressure, 'EdgeColor', 'none');
+plotGrid(G, W.cells, 'FaceColor', 'none', 'EdgeColor', 'k', 'LineWidth', 1.5);
+colorbar;
+title({'Pressure distribution (Pascal)' ['Time: ', formatTimeRange(t)]});
+axis equal tight
+view([0, 0])
+drawnow
+
+saveas(f3, 'summer_sintef/case1/plots/pres_0', 'png');
+
 %% Copmute solutions
 [wellSols, states] = simulateScheduleAD(state, model, schedule, 'Verbose', true);
 
@@ -138,6 +147,9 @@ for i=1:numel(states)
     S = states{i}.s(:,1);
     assert(max(S) < 1+eps && min(S) > -eps);
     
+    p = reshape(states{i}.pressure, [max(ii), max(kk)]);
+    p_mean(:,i) = mean(p, 1).';
+    
     figure(2);
     plotCellData(G, S, 'EdgeColor', 'none');
     colormap(flipud(winter)); colorbar; caxis([0 1]);
@@ -146,11 +158,31 @@ for i=1:numel(states)
     view([0, 0])
     drawnow, pause(0.2)
     
+    figure(3);
+    plotCellData(G, states{i}.pressure, 'EdgeColor', 'none');
+    colorbar;
+    title({'Pressure distribution (Pascal)' ['Time: ', formatTimeRange(t)]});
+    axis equal tight
+    view([0, 0])
+    drawnow, pause(0.2)
+    
     if ~mod(i, dt_plot)
        filename_f2 = sprintf('summer_sintef/case1/plots/sat_%d', i);
+       filename_f3 = sprintf('summer_sintef/case1/plots/pres_%d', i);
        saveas(f2, filename_f2, 'png');
+       saveas(f3, filename_f3, 'png');
    end
 end
 
+f4 = figure(4);
+pcolor(p_mean); shading interp;
+set(gca, 'YDir', 'reverse');
+title('Horizontally averaged pressure');
+xlabel('Time steps');
+ylabel('Depth (m)');
+colorbar;
+drawnow;
+%saveas(f4, 'summer_sintef/case1/plots/avg_pressure', 'png');
+
 %% TESTING
-[i, j, k] = gridLogicalIndices(G)
+G.cells.indexMap(k == 2);
