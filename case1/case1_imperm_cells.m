@@ -87,7 +87,7 @@ view([0, 0])
 drawnow
 hold off
 
-saveas(f1, 'summer_sintef/case1/plots/perm_field', 'png');
+%saveas(f1, 'summer_sintef/case1/plots/perm_field', 'png');
 
 %% Set up solver
 gravity reset on
@@ -122,7 +122,7 @@ axis equal tight
 view([0, 0])
 drawnow
 
-saveas(f2, 'summer_sintef/case1/plots/sat_0', 'png');
+%saveas(f2, 'summer_sintef/case1/plots/sat_0', 'png');
 
 f3 = figure(3); % to plot pressure
 
@@ -135,7 +135,7 @@ axis equal tight
 view([0, 0])
 drawnow
 
-saveas(f3, 'summer_sintef/case1/plots/pres_0', 'png');
+%saveas(f3, 'summer_sintef/case1/plots/pres_0', 'png');
 
 %% Copmute solutions
 [wellSols, states] = simulateScheduleAD(state, model, schedule, 'Verbose', true);
@@ -169,8 +169,8 @@ for i=1:numel(states)
     if ~mod(i, dt_plot)
        filename_f2 = sprintf('summer_sintef/case1/plots/sat_%d', i);
        filename_f3 = sprintf('summer_sintef/case1/plots/pres_%d', i);
-       saveas(f2, filename_f2, 'png');
-       saveas(f3, filename_f3, 'png');
+       %saveas(f2, filename_f2, 'png');
+       %saveas(f3, filename_f3, 'png');
    end
 end
 
@@ -185,4 +185,4 @@ drawnow;
 %saveas(f4, 'summer_sintef/case1/plots/avg_pressure', 'png');
 
 %% TESTING
-G.cells.indexMap(k == 2);
+G.cells.indexMap(kk == 2);
