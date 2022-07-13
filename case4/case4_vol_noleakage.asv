@@ -130,12 +130,10 @@ for k=1:numel(layer_types)
                                          x < x_slice_stop & ...
                                          z > z_anticline_stop(j) & ...
                                          z <= z_bottom).';
-            trapped_cells_cat = cat(2, trapped_cells_cat, trapped_slice);
+            trapped_cells{i} = cat(2, trapped_cells{i}, trapped_slice);
 
             anticline_cells = cat(1, anticline_cells, anticline_single);
         end
-        
-        trapped_cells = cat(1, trapped_cells, trapped_cells_cat);
         
         num_z_cells = max_z-min_z+1; % +1 to get correct nr vertical cells in anticline form            
 
@@ -165,12 +163,10 @@ for k=1:numel(layer_types)
         max_z = max(kk(line_cells));
         z_bottom = unique(z(kk == max_z + 1));
         
-        trapped_cells_cat = G.cells.indexMap(x >= x_start.(layer_type)(i) & ...
+        trapped_cells{i} = G.cells.indexMap(x >= x_start.(layer_type)(i) & ...
                                     x <= x_stop.(layer_type)(i) & ...
                                     z > z_stop.(layer_type)(i) & ...
                                     z <= z_bottom).';
-                                
-        trapped_cells = cat(1, trapped_cells, trapped_cells_cat);
                                     
         [ix, jy, kz] = gridLogicalIndices(G, line_cells);
         nxi = numel(unique(ix)); nzi = numel(unique(kz)); % dimensions of particular low-perm layer
@@ -240,7 +236,7 @@ dummyW = addWell([], G, rock, perforation_idx, ...
         'Name', 'P1');
     
 %% Plot permeability field
-all_trapped_cells = horzcat(trapped_cells{:});
+all_trapped_cells = cell2mat(trapped_cells);
 
 clf;
 f1 = UtilFunctions.fullsizeFig(1);
