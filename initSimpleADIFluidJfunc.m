@@ -159,7 +159,7 @@ nPh = numel(names);
 assert(nPh == numel(unique(double(names))), 'Duplicate phases detected.');
 assert(sum(opt.smin) < .99, 'Sum of connate/critical saturations must be smaller than 1');
 
-fluid.pcOW = pc_funct(opt);
+fluid.pcOW = @(Sw) pc_funct(Sw, opt);
 
 for i = 1:nPh
     n = names(i);
@@ -218,10 +218,14 @@ function mu = constantViscosity(mu, p, varargin)
 mu = p.*0 + mu;
 end
 
-function pcOW = pc_funct(opt)
-     S_scaled = @(S) (S - opt.smin(1)) / (1 - opt.smin(2) - opt.smin(1));                 
+function pcOW = pc_funct(Sw, opt)
+     %S_scaled = @(S) (S - opt.smin(1)) / (1 - opt.smin(2) - opt.smin(1));                 
+     S_scaled = @(S) max(S - opt.smin(1), 1e-5);
      J = @(S) opt.J1./((1 + opt.k1*S_scaled(S)).^opt.n(1)) - opt.J2./((1 + opt.k2*(1-S_scaled(S))).^opt.n(1)) + opt.J3;                 
-     pcOW = @(S) opt.sigma*cos(opt.theta)*sqrt(opt.rock.poro./opt.rock.perm).*J(S);      
+     %pcOW = @(S) opt.sigma*cos(opt.theta)*sqrt(opt.rock.poro./opt.rock.perm).*J(S);
+     disp(size(sqrt(mean(opt.rock.poro)./opt.rock.perm)))
+     disp(size(J(Sw)))   
+     pcOW = opt.sigma*cos(opt.theta)*sqrt(mean(opt.rock.poro)./opt.rock.perm).*J(Sw); 
      %pc_val(S_scaled <= 0) = max(pc_val(S_scaled > 0)); % cap value at residual saturation 
      %pc_val(S_scaled >= 1) = 0; % No pressure if only water apparent
 end

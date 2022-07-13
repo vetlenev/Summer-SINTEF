@@ -7,7 +7,7 @@
 mrstModule add incomp ad-core ad-blackoil ad-props mrst-gui test-suite
 ROOTDIR = strrep(ROOTDIR, '\', '/');
 seed = rng();
-seed.Seed = 5422; % Must set here, otherwise not updated
+seed.Seed = 6551; % Must set here, otherwise not updated
 
 %% Define 2D grid
 nx = 75; ny = 1; nz = 60; % 100 50
@@ -30,14 +30,16 @@ perm = repmat(baseperm, [G.cells.num 1]);
 poro = 0.3;
 
 %% Directories
-n_lowperm_layers = 30;
-leaked_perc = 0.05; % allow 5% leakage
+n_lowperm_layers = 15;
+n_imperm_layers = round(n_lowperm_layers/3);
+leaked_perc = 0.0; % allow X*100% leakage
 
-plot_base_dir = strcat(ROOTDIR, '../summer_sintef/case4/plots_noleakage');
-data_dir = strcat(ROOTDIR, '../summer_sintef/case4/data_noleakage');
+plot_base_dir = strcat(ROOTDIR, '../summer_sintef/case4/plots_optimal');
+data_base_dir = strcat(ROOTDIR, '../summer_sintef/case4/data_optimal');
 leaked_perc_str = erase(string(leaked_perc), '.');
-plot_dir = sprintf(strcat(plot_base_dir, '/layers_%d_lp_%s'), n_lowperm_layers, leaked_perc_str);
-dir_exists = mkdir(plot_base_dir) & mkdir(data_dir) & mkdir(plot_dir);
+plot_dir = sprintf(strcat(plot_base_dir, '/lp_%s/layers_%d'), leaked_perc_str, n_lowperm_layers);
+data_dir = sprintf(strcat(data_base_dir, '/lp_%s/layers_%d'), leaked_perc_str, n_lowperm_layers);
+dir_exists = mkdir(plot_base_dir) & mkdir(data_base_dir) & mkdir(data_dir) & mkdir(plot_dir);
 
 %% Define low-perm cells
 perc_val = @(arr, perc, varargin) perc*(max(arr) - min(arr)) + min(arr);
@@ -177,7 +179,7 @@ hold off
                        
 %% Capillary pressure
 dummy_Sw = linspace(0, 1, G.cells.num)';
-p_e = 0.3*barsa;
+p_e = 0.5*barsa;
 p_cap = 3*barsa;
 pc_vals = UtilFunctions.Pc(dummy_Sw, swr, p_e, p_cap, 2);
 
@@ -254,8 +256,11 @@ bc = pside(bc, G, 'Top', p_top, 'sat', [1 0]);
 pz = fluid.rhoWS * norm(gravity) * unique(z); % hydrostatic pressure in entire domain
 bc = pside(bc, G, 'Right', pz, 'sat', [1 0]);
 
-tot_time = 8000*day();
-dt = rampupTimesteps(tot_time, 70*day(), 10);
+tot_time = 16000*day();
+dt = rampupTimesteps(tot_time, 75*day(), 10);
+
+inj_years = regexp(formatTimeRange(tot_time), '\d+ Years', 'match');
+years = strrep(inj_years, ' ', '_');
 
 %% Initial state
 % To simulate CO2 in supercritical phase, use initial pressure of 100 barsa
@@ -291,13 +296,14 @@ saveas(f4, strcat(plot_dir, '/cap_pres_0'), 'png');
 %% Run experiment
 inj_stop_rate = 0.3;
 % start with injection rate corresponding to 1/pv'th of total pore volume
-pv = 100;
+pv = 100; % start with rate yielding total volume of 1/100th of pore volume in domain
 rates = [(sum(poreVolume(G, rock))/pv) / (inj_stop_rate*tot_time)];
+kmax = 12; % max 10 optimization steps
 
 [max_volumes, leaked_boundary, has_leaked, ...
-    states, rates, rel_diff, categorized_vols] = FindMaxVolumeNoLeakage(G, rock, rates, state, model, ...
+    states, rates, scales, rel_diff, categorized_vols] = FindMaxVolumeNoLeakage(G, rock, rates, state, model, ...
                                                                          all_trapped_cells, snr, dt, bc, ...
-                                                                         inj_stop_rate, leaked_perc);
+                                                                         inj_stop_rate, leaked_perc, kmax);
 
 
 %% Show optimal solution found                                                       
@@ -363,21 +369,187 @@ plot(plot_rates, max_volumes, 'black');
 
 xlabel('Iterations');
 ylabel('Volume (m^3)');
-title({'Optimizing total injection volume.', sprintf('Green: below %.1f %% leakage.', leaked_perc*100), sprintf('Red: above %.1f %% leakage.', leaked_perc*100)});
+title({'Optimizing total CO2 volume, injecting for', formatTimeRange(tot_time), sprintf('Green: below %.1f %% leakage. Red: above %.1f %% leakage.', leaked_perc*100, leaked_perc*100)});
 drawnow
 saveas(f5, strcat(plot_dir, '/opt_vol_search_', date), 'png');
 
 
 %% Store volume categories
-residual_ratio_filename = sprintf(strcat(data_dir, '/residual_leaked_%s_layers_%d_seed_%d.mat'), leaked_perc_str, n_lowperm_layers, seed.Seed);
-struct_ratio_filename = sprintf(strcat(data_dir, '/struct_leaked_%s_layers_%d_seed_%d.mat'), leaked_perc_str, n_lowperm_layers, seed.Seed);
-free_ratio_filename = sprintf(strcat(data_dir, '/free_leaked_%s_layers_%d_seed_%d.mat'), leaked_perc_str, n_lowperm_layers, seed.Seed);
+%residual_ratio_filename = sprintf(strcat(data_dir, '/residual_leaked_%s_layers_%d_seed_%d.mat'), leaked_perc_str, n_lowperm_layers, seed.Seed);
+residual_ratio_filename = sprintf(strcat(data_dir, '/residual_%s_seed_%d.mat'), years{1}, seed.Seed);
+struct_ratio_filename = sprintf(strcat(data_dir, '/struct_%s_seed_%d.mat'), years{1}, seed.Seed);
+free_ratio_filename = sprintf(strcat(data_dir, '/free_%s_seed_%d.mat'), years{1}, seed.Seed);
+inj_rate_filename = sprintf(strcat(data_dir, '/inj_rate_%s_seed_%d.mat'), years{1}, seed.Seed);
 
 residual_vol = categorized_vols{1};
 structural_vol = categorized_vols{2};
 free_vol = categorized_vols{3};
+inj_rate = rates(end);
 
 save(residual_ratio_filename, 'residual_vol'); % save to compare for different nr low-perm layers
 save(struct_ratio_filename, 'structural_vol');
 save(free_ratio_filename, 'free_vol');
+save(inj_rate_filename, 'inj_rate');
 
+%% Read data and store in structs
+lp_folders = dir(strcat(data_base_dir, '/lp_*'));
+lp_folders = UtilFunctions.sortStructByField(lp_folders, 'name');
+
+num_lp = numel(lp_folders);
+num_layers = zeros(num_lp, 1);
+
+used_lab = {{}, {{}}}; % first: percentage leakage, second: num layers
+unique_lab_idx = {[], []};
+
+structural_struct = struct;
+residual_struct = struct;
+free_struct = struct;
+inj_struct = struct;
+
+for i=1:num_lp
+    lab_leaked = regexp(lp_folders(i).name, 'lp_\d+', 'match');     
+    used_lab{1} = cat(2, used_lab{1}, lab_leaked{1});
+    %unique_lab_idx{1} = cat(2, unique_lab_idx{1}, i);
+    
+    %if lab_leaked{1} == leaked_perc_str % only plot layer configuration for current leaked percentage               
+    layer_folders = dir(strcat(lp_folders(i).folder, '/', lp_folders(i).name, '/layers_*'));  
+    layer_folders = UtilFunctions.sortStructByField(layer_folders, 'name');
+    num_layers(i) = numel(layer_folders);   
+
+    for j=1:num_layers(i)
+        lab_layers = regexp(layer_folders(j).name, 'layers_\d+', 'match');
+        %if ~any(ismember(used_lab{2}{i}, lab_layers{1}))
+        used_lab{2}{i} = cat(2, used_lab{2}{i}, lab_layers{1});      
+        
+        inj_files = dir(strcat(layer_folders(j).folder, '/', layer_folders(j).name, '/inj_rate_*.mat'));
+        inj_struct.(lab_leaked{1}).(lab_layers{1}) = [];
+        
+        for k=1:numel(inj_files)
+            load_injrate = load(strcat(inj_files(k).folder, '\', inj_files(k).name), 'inj_rate');
+            inj_struct.(lab_leaked{1}).(lab_layers{1}) = cat(1, inj_struct.(lab_leaked{1}).(lab_layers{1}), load_injrate.inj_rate);
+        end
+
+        structural_files = dir(strcat(layer_folders(j).folder, '/', layer_folders(j).name, '/struct_*.mat'));
+        free_files = dir(strcat(layer_folders(j).folder, '/', layer_folders(j).name, '/free_*.mat'));
+        residual_files = dir(strcat(layer_folders(j).folder, '/', layer_folders(j).name, '/residual_*.mat'));
+        
+        structural_struct.(lab_leaked{1}).(lab_layers{1}) = [];
+        free_struct.(lab_leaked{1}).(lab_layers{1}) = [];
+        residual_struct.(lab_leaked{1}).(lab_layers{1}) = [];
+        
+        for k=1:numel(free_files) % assume same number of files for given lp and num layers
+            load_structural = load(strcat(structural_files(k).folder, '\', structural_files(k).name), 'structural_vol');
+            % NB: appended row-wise, so to access a specific seed do:
+            % structural_struct.layers_X.lp_Y(i,:)
+            structural_struct.(lab_leaked{1}).(lab_layers{1}) = cat(2, structural_struct.(lab_leaked{1}).(lab_layers{1}), load_structural.structural_vol);       
+            load_free = load(strcat(free_files(k).folder, '\', free_files(k).name), 'free_vol');
+            free_struct.(lab_leaked{1}).(lab_layers{1}) = cat(2, free_struct.(lab_leaked{1}).(lab_layers{1}), load_free.free_vol);  
+            load_residual = load(strcat(residual_files(k).folder, '\', residual_files(k).name), 'residual_vol');
+            residual_struct.(lab_leaked{1}).(lab_layers{1}) = cat(2, residual_struct.(lab_leaked{1}).(lab_layers{1}), load_residual.residual_vol);  
+        end
+    end
+end
+
+
+%% Plot optimal injection rate across lp's
+% Compute mean and variance for each num layers
+mean_lp = struct;
+var_lp = struct;
+ticks = {};
+
+for i=1:num_lp
+    lp_lab = used_lab{1}(i);
+    ticks{i} = strrep(lp_lab{1}, 'lp_0', '0.');
+    for j=1:num_layers(i)
+        layer_lab = used_lab{2}{i}(j);
+        mean_lp.(layer_lab{1}).(lp_lab{1}) = mean(inj_struct.(lp_lab{1}).(layer_lab{1}), 1);
+        var_lp.(layer_lab{1}).(lp_lab{1}) = var(inj_struct.(lp_lab{1}).(layer_lab{1}), 0, 1);
+
+    end
+end
+
+
+f6 = figure(6);
+fields_layers = fieldnames(mean_lp);
+for i=1:numel(fields_layers)
+    plot(1:numel(mean_lp.(fields_layers{i})), struct2array(mean_lp.(fields_layers{i})), ...
+        '--.', 'MarkerSize', 15, 'DisplayName', strrep(fields_layers{i}, '_', ' '));
+    hold on    
+end
+
+xlabel('Allowed leakage (percentage)')
+ylabel('Rate (m^3/s)')
+xticks(1:num_lp);
+xticklabels(ticks);
+
+tot_time_cut = regexp(formatTimeRange(tot_time), '.+?Days', 'match');
+inj_time_cut = regexp(formatTimeRange(tot_time*inj_stop_rate), '.+?Days', 'match');
+title({'Optimal injection rate to satifsy given leakage amount.', ...
+        strcat('Simulation time: ', tot_time_cut{1}), ...
+        strcat('Injection time: ', inj_time_cut{1})})
+legend();    
+drawnow
+
+saveas(f6, strcat(plot_base_dir, '/all_optimal_rates'), 'png');
+    
+
+%% Plot volume distributions
+fm = 7;
+fig_mean = figure(fm);
+fv = 8;
+fig_var = figure(fv);
+
+linS = {'-', '--', ':', '-o', '--o'};
+
+for i=1:num_lp % one figure for each lp
+    mean_layers = struct;
+    var_layers = struct;
+    
+    lp_lab = used_lab{1}(i);
+    lp_perc = strrep(lp_lab{1}, 'lp_0', '0.');
+    for j=1:num_layers(i)
+        layer_lab = used_lab{2}{i}(j);
+        mean_layers.structural.(layer_lab{1}) = mean(structural_struct.(lp_lab{1}).(layer_lab{1}), 2);
+        var_layers.structural.(layer_lab{1}) = var(structural_struct.(lp_lab{1}).(layer_lab{1}), 0, 2);
+        mean_layers.free.(layer_lab{1}) = mean(free_struct.(lp_lab{1}).(layer_lab{1}), 2);
+        var_layers.free.(layer_lab{1}) = var(free_struct.(lp_lab{1}).(layer_lab{1}), 0, 2);
+        mean_layers.residual.(layer_lab{1}) = mean(residual_struct.(lp_lab{1}).(layer_lab{1}), 2);
+        var_layers.residual.(layer_lab{1}) = var(residual_struct.(lp_lab{1}).(layer_lab{1}), 0, 2);
+        
+        %t = 1:numel(mean_layers.structural.(layer_lab{1}));
+        figure(fm);
+        hold on      
+        plot(mean_layers.structural.(layer_lab{1}), linS{j}, 'Color', 'blue', 'DisplayName', ['Structural: ', strrep(layer_lab{1}, '_', ' ')], 'LineWidth', 1.5);      
+        plot(mean_layers.residual.(layer_lab{1}), linS{j}, 'Color', 'red', 'DisplayName', ['Residual: ', strrep(layer_lab{1}, '_', ' ')], 'LineWidth', 1.5); 
+        plot(mean_layers.free.(layer_lab{1}), linS{j}, 'Color', 'green', 'DisplayName', ['Free: ', strrep(layer_lab{1}, '_', ' ')], 'LineWidth', 1.5); 
+        
+        figure(fv);
+        hold on
+        plot(var_layers.structural.(layer_lab{1}), 'Color', 'blue', 'DisplayName', ['Structural: ', strrep(layer_lab{1}, '_', ' ')], 'LineWidth', 1.5);
+        plot(var_layers.residual.(layer_lab{1}), 'Color', 'red', 'DisplayName', ['Residual: ', strrep(layer_lab{1}, '_', ' ')], 'LineWidth', 1.5);
+        plot(var_layers.free.(layer_lab{1}), 'Color', 'green', 'DisplayName', ['Free: ', strrep(layer_lab{1}, '_', ' ')], 'LineWidth', 1.5);
+               
+    end
+    
+    figure(fm)
+    xlabel('Time step')
+    ylabel('Volume (m^3)')
+    title({'Mean volume distribution.', ['Allowing ', lp_perc, ' rate of leakage.']})  
+    legend('Location', 'northwest')  
+    saveas(fig_mean, sprintf(strcat(plot_base_dir, '/lp_%s/mean_trapping'), leaked_perc_str), 'png');
+    
+    figure(fv)
+    xlabel('Time step')
+    ylabel('Volume (m^3)')
+    title({'Variance of volume distribution.', ['Allowing ', lp_perc, ' rate of leakage.']}) 
+    legend()
+    saveas(fig_var, sprintf(strcat(plot_base_dir, '/lp_%s/var_trapping'), leaked_perc_str), 'png')
+    
+    fm = fm + 2;
+    fig_mean = figure(fm);
+    fv = fv + 2;
+    fig_var = figure(fv);
+end
+
+
+%% TESTING

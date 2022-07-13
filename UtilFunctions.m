@@ -5,6 +5,12 @@ classdef UtilFunctions
            f.Position = get(0, 'Screensize');           
        end
        
+       function sorted_struct = sortStructByField(my_struct, fieldname)
+           tab = struct2table(my_struct);
+           sorted_tab = sortrows(tab, fieldname);
+           sorted_struct = table2struct(sorted_tab);
+       end
+       
       function pc_val = Pc(S, swr, p_e, cap, n)
          S_scaled = max(S-swr, 1e-5);
          pc_val = p_e*S_scaled.^(-1/n); % Corey model
@@ -13,14 +19,15 @@ classdef UtilFunctions
          pc_val(S==1) = 0; % No pressure if no saturation
       end
       
-      function pc_val = LeverettJ(S, swr, snr, phi, K, n, J1, J2, J3, k1, k2)                 
+      function pc_val = LeverettJ(S, swr, snr, phi, K, K_base, n, J1, J2, J3, k1, k2)                 
          S_scaled = (S - swr) / (1 - snr- swr);                 
          J = J1./((1 + k1*S_scaled).^n) - J2./((1 + k2*(1-S_scaled)).^n) + J3;  
          theta = 0;
          sigma = 0.02;            
-         pc_val = sigma*cos(theta)*sqrt(phi./K).*J;      
-         pc_val(S_scaled <= 0) = max(pc_val(S_scaled > 0)); % cap value at residual saturation 
-         pc_val(S_scaled >= 1) = 0; % No pressure if only water apparent
+         pc_val = sigma*cos(theta)*sqrt(phi./K).*J;           
+         %pc_val(S <= swr) = max(pc_val(S > swr)); % cap value at residual saturation 
+         %pc_val(S == 0) = 0; % No pressure if only water apparent
+         pc_val(K == K_base) = 0; % No capillary pressure in background
       end
       
       function [tot_vol, region_vol] = Co2VolumeRatio(G, cells, S, rock, fluid)
