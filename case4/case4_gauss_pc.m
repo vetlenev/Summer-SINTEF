@@ -7,7 +7,7 @@
 mrstModule add incomp ad-core ad-blackoil ad-props mrst-gui test-suite
 ROOTDIR = strrep(ROOTDIR, '\', '/');
 seed = rng();
-seed.Seed = 5788; % Must set here, otherwise not updated
+seed.Seed = 8854; % Must set here, otherwise not updated
 
 %% Define 2D grid
 nx = 75; ny = 1; nz = 75; % 100 50
@@ -23,135 +23,30 @@ x = G.cells.centroids(:,1);
 z = G.cells.centroids(:,3);
 
 %% Define rock and fluid objects
-lowperm = 20*milli*darcy;
+lowperm = 10*milli*darcy;
 baseperm = 100*milli*darcy;
 perm = repmat(baseperm, [G.cells.num 1]);
-poro = 0.5;
+poro = 0.3;
 
 %% Directories
 n_lowperm_layers = 15;
 n_imperm_layers = round(n_lowperm_layers/3);
 
-plot_base_dir = strcat(ROOTDIR, '../summer_sintef/case4/plots_pc_LJ');
-data_dir = strcat(ROOTDIR, '../summer_sintef/case4/data_pc_LJ');
+plot_base_dir = strcat(ROOTDIR, '../summer_sintef/case4/plots_pc_LJ_8');
+data_dir = strcat(ROOTDIR, '../summer_sintef/case4/data_pc_LJ_8');
 plot_dir = sprintf(strcat(plot_base_dir, '/layers_%d'), n_lowperm_layers);
 dir_exists = mkdir(plot_base_dir) & mkdir(data_dir) & mkdir(plot_dir);
 
-%% Define low-perm cells
-perc_val = @(arr, perc, varargin) perc*(max(arr) - min(arr)) + min(arr);
+%% Set up grid with layers
+[x_start, x_stop, z_start, ...
+    z_stop, line_idx, anticline_idx] ...
+  = GridSetup.DefineLayers(G, n_lowperm_layers, n_imperm_layers);
 
-x_start = struct; x_stop = struct;
-z_start = struct; z_stop = struct;
-
-rand_x_start = linspace(perc_val(x, 0.0), perc_val(x, 0.9), n_lowperm_layers+n_imperm_layers);
-rand_x_start = rand_x_start(randperm(length(rand_x_start))); % random permute
-
-x_start.lowperm = rand_x_start(1:n_lowperm_layers);
-x_start.imperm = rand_x_start(n_lowperm_layers+1:n_lowperm_layers+n_imperm_layers);
-
-x_stop.lowperm = x_start.lowperm + randi([round(perc_val(x, 0.1)), ...
-                                    round(perc_val(x, 0.4))], ...
-                                    [n_lowperm_layers, 1]).';
-x_stop.imperm = x_start.imperm + randi([round(perc_val(x, 0.1)), ...
-                                    round(perc_val(x, 0.4))], ...
-                                    [n_imperm_layers, 1]).';
-                                
-x_stop.lowperm = min(x_stop.lowperm, round(perc_val(x, 1))); % prevent layer going out of bounds
-x_stop.imperm = min(x_stop.imperm, round(perc_val(x, 1)));
-
-anticline_idx = 1:3:(n_lowperm_layers+n_imperm_layers); % every third layer is anticline
-
-line_idx = setdiff(1:(n_lowperm_layers+n_imperm_layers), anticline_idx); % indices for line layers
-
-rand_z_start = linspace(perc_val(z, 0.05), perc_val(z, 0.5), n_lowperm_layers+n_imperm_layers-1);
-rand_z_start = rand_z_start(randperm(length(rand_z_start)));
-z_start.lowperm = rand_z_start(1:n_lowperm_layers-1);
-z_start.imperm = rand_z_start(n_lowperm_layers:n_lowperm_layers+n_imperm_layers-1);
-
-z_start.lowperm(n_lowperm_layers) = perc_val(z, 0.85); % make gap between the small low-perm layers and the large one at bottom
-z_stop.lowperm = z_start.lowperm + perc_val(z, 0.02);
-z_stop.imperm = z_start.imperm + perc_val(z, 0.02);
-
-%% Generate layers
-added_layers = {[], []};
-layer_types = {'lowperm', 'imperm'};
-anticline_idxs = {anticline_idx(1:round(n_lowperm_layers/(n_lowperm_layers+n_imperm_layers)*length(anticline_idx))), ...
-                    anticline_idx(round(n_lowperm_layers/(n_lowperm_layers+n_imperm_layers)*length(anticline_idx))+1:end) ...
-                     - n_lowperm_layers};
-line_idxs = {line_idx(1:round(n_lowperm_layers/(n_lowperm_layers+n_imperm_layers)*length(line_idx))), ...
-                    line_idx(round(n_lowperm_layers/(n_lowperm_layers+n_imperm_layers)*length(line_idx))+1:end) ...
-                     - n_lowperm_layers};                
-perm_vals = {lowperm, 0.0};                
-
-% Make anticline forms
-for k=1:numel(layer_types)
-    layer_type = layer_types{k};
-    for i=anticline_idxs{k}
-        num_x_cells = numel(G.cells.indexMap(x > x_start.(layer_type)(i) ... 
-                            & x < x_stop.(layer_type)(i) ...
-                            & z == min(z))); % only select ONE horizontal patch
-        theta0 = pi/4;
-        theta = linspace(theta0, pi - theta0, num_x_cells);
-        r = (x_stop.(layer_type)(i) - x_start.(layer_type)(i))/2;
-        z_anticline_start = -r*sin(theta) + z_start.(layer_type)(i) + r/2*(1+cos(pi/2-theta0)); % -r*sin to get anticline (since z positive downwards)
-        z_anticline_stop = -r*sin(theta) + z_stop.(layer_type)(i) + r/2*(1+cos(pi/2-theta0)); % + r*cos(pi/4) to shift to bottom of spherical cap
-
-        anticline_cells = [];
-        max_z = 0; min_z = inf;
-        for j=1:num_x_cells
-            anticline_single = G.cells.indexMap(x > (x_stop.(layer_type)(i) - x_start.(layer_type)(i))*(j-1)/num_x_cells + x_start.(layer_type)(i) & ...
-                                        x < (x_stop.(layer_type)(i) - x_start.(layer_type)(i))*j/num_x_cells + x_start.(layer_type)(i) & ...
-                                        z > z_anticline_start(j) & ...
-                                        z < z_anticline_stop(j));
-            [ix, jy, kz] = gridLogicalIndices(G, anticline_single);       
-            max_z = max(max(kz), max_z); % max depth of this anticline form
-            min_z = min(min(kz), min_z); % min depth of this anticline form
-
-            anticline_cells = cat(1, anticline_cells, anticline_single);
-        end
-        corr_len_x = (num_x_cells*(lx/nx))/200;
-        num_z_cells = max_z-min_z+1; % +1 to get correct nr vertical cells in anticline form
-        corr_len_z = (num_z_cells*(lz/nz))/10;  
-
-        anticline_cells_dummy = G.cells.indexMap(x > x_start.(layer_type)(i) & ...
-                                        x < x_stop.(layer_type)(i) & ...
-                                        z > min(z_anticline_start) & ...
-                                        z < max(z_anticline_stop));
-
-        overlapped_cells = ismember(anticline_cells_dummy, vertcat(added_layers{:}));
-        store_perm = perm(overlapped_cells);
-        
-        %anticline_cells_unique = setdiff(anticline_cells_dummy, vertcat(added_layers{:}));
-        perm(anticline_cells_dummy) = perm_vals{k} + perm_vals{k}*FastGaussian([num_x_cells num_z_cells], 0.8, [corr_len_x corr_len_z]); % rectangular box around anticline
-        perm(overlapped_cells) = store_perm;
-        perm(setdiff(anticline_cells_dummy, vertcat(anticline_cells, vertcat(added_layers{:})))) = baseperm; % reset perm for parts of rectangle NOT part of anticline
-        added_layers{k} = cat(1, added_layers{k}, anticline_cells);
-    end
-    
-    % Make straight forms
-    for i=line_idxs{k}
-        if i == line_idxs{k}(end) && strcmp(layer_type, 'lowperm')
-            x_start.(layer_type)(i) = min(x);
-            x_stop.(layer_type)(i) = max(x);
-            z_stop.(layer_type)(i) = z_start.(layer_type)(i) + perc_val(z, 0.04); % increase vertical extent of the full-blocking layer
-        end
-
-        line_cells = G.cells.indexMap(x >= x_start.(layer_type)(i) & ...
-                                        x <= x_stop.(layer_type)(i) & ...
-                                        z > z_start.(layer_type)(i) & ...
-                                        z < z_stop.(layer_type)(i));
-        [ix, jy, kz] = gridLogicalIndices(G, line_cells);
-        nxi = numel(unique(ix)); nzi = numel(unique(kz)); % dimensions of particular low-perm layer
-        corr_len_x = (max(x(ix)) - min(x(ix)) + lx/nx)/200;
-        corr_len_z = (max(z(kz)) - min(z(kz)) + lx/nx)/10;
-        perm(line_cells) = perm_vals{k} + perm_vals{k}*FastGaussian([nxi nzi], 0.8, [corr_len_x corr_len_z]);
-        added_layers{k} = cat(1, added_layers{k}, line_cells);
-    end
-end
-
-% Make 
-perm = max(perm, baseperm/100); % perm must be positive -> cap at non-zero value to avoid singular matrix
-all_added_layers = vertcat(added_layers{:});
+[perm, all_added_layers, trapped_cells] ...
+  = GridSetup.GenerateLayers(line_idx, anticline_idx, ... 
+                    n_lowperm_layers, n_imperm_layers, ...
+                    G, x_start, x_stop, z_start, z_stop, ...
+                    perm, lowperm, baseperm);
 
 %% Compute rock+fluid objects
 rock = makeRock(G, perm, poro);
@@ -173,7 +68,7 @@ sor = 0.2;
                        
 fluid = initSimpleADIFluid('phases', 'WO', ... % [water, GAS] or OIL?
                            'mu', [1, 0.05]*centi*poise, ... % viscosity
-                           'n',  [2, 2], ... % relperm powers
+                           'n',  [1.5, 2], ... % relperm powers
                            'rho', [1000, 650]*kilogram/meter^3, ... % densities: [water, CO2]
                            'smin', [swr, sor]);                      
              
@@ -194,29 +89,28 @@ saveas(f1, strcat(plot_dir, '/relperm'), 'png');
 hold off
                        
 %% Capillary pressure
-dummy_Sw = linspace(0, 1, 1000)';
-dummy_K = linspace(min(perm(added_layers{1})), max(perm(added_layers{1})), 1000)';
-[grid_Sw, grid_K] = ndgrid(dummy_Sw, dummy_K);
-p_e = 0.5*barsa;
-p_cap = 3*barsa;
+dummy_Sw = linspace(0, 1, G.cells.num)';
+dummy_K = linspace(min(perm(added_layers{1})), max(perm(added_layers{1})), G.cells.num)';
+
+p_e = 8*barsa; % 0.5
+p_cap = 40*barsa; % 3
+median_pc = 8*barsa;
 %S_scaled = max((1-dummy_Sw-swr)./(1-swr), 1e-5);
-%pc_vals = UtilFunctions.LeverettJ(dummy_Sw, swr, sor, poro, perm, baseperm, 2, 1.149, 0.1549, 0, 0.994, 65.0);
-pc_vals = UtilFunctions.Pc(dummy_Sw, swr, p_e, p_cap, 2);
+standard_pc = 0;
 
-% 2D: 
-% region_table = {{grid_Sw, grid_K, zeros(size(grid_Sw))}, ...
-%                 {grid_Sw, grid_K,  pc_vals}}; % container for pc values in each region
-% region_idx = {setdiff(G.cells.indexMap, all_lowperm_cells).', all_lowperm_cells}; % region to interpolate (rest, lowperm)
-% fluid.pcOW = @(S, K, varargin) interpReg2D(region_table, S, K, region_idx); % in both regions, interpolate over saturations S
+if standard_pc
+    plot_pc_lim = p_cap;
+    fluid.pcOW = @(S, varargin) runStandardPc(S, dummy_Sw, swr, snr, p_e, p_cap, all_added_layers, G);
+else
+    plot_pc_lim = 5*median_pc;
+    fluid.pcOW = @(S, varargin) UtilFunctions.LeverettJ(S, poro, perm, baseperm, median_pc);
+end
 
-region_table = {[dummy_Sw, zeros(size(dummy_Sw))], ...
-                 [dummy_Sw, pc_vals]}; % container for pc values in each region
-region_idx = {setdiff(G.cells.indexMap, added_layers{1}).', added_layers{1}};             
-%fluid.pcOW = @(S, varargin) interpReg(region_table, S, region_idx);
+%fluid.pcOW = @(S, varargin) runLeverettJ_2D(S, dummy_Sw, poro, perm, dummy_K, baseperm, G);
 
-fluid.pcOW = @(S, varargin) UtilFunctions.LeverettJ(S, swr, sor, poro, ...
-                                                     perm, baseperm, 2, 1.149, ...
-                                                     0.1549, 0, 0.994, 65.0);
+% fluid.pcOW = @(S, varargin) UtilFunctions.LeverettJnew(S, swr, sor, poro, ...
+%                                                      perm, baseperm, 2, 1.149, ...
+%                                                      0.1549, 0, 0.994, 65.0);
 
 % figure(1);
 % plot(dummy_Sw, pc_vals(:, 200:100:800), 'LineWidth', 1.5);
@@ -227,7 +121,7 @@ fluid.pcOW = @(S, varargin) UtilFunctions.LeverettJ(S, swr, sor, poro, ...
 % hold off
 
 %% Horizontal well
-rate = 12*meter^3/day(); % 25 | 3
+rate = 10*meter^3/day(); % 25 | 3
 %bhp = 30*barsa;
 % Put well one cell above bottom to avoid it interacting with bottom BC
 well_h = 1; % cell perforations in vertical direction
@@ -244,7 +138,7 @@ clf;
 f1 = UtilFunctions.fullsizeFig(1);
 plotGrid(G, all_added_layers, 'FaceColor', 'none', 'EdgeColor', 'black', 'EdgeAlpha', 0.2);
 perm_dummy = convertTo(perm, milli*darcy); % to better illuminate the gaussian perm in low-perm layers
-%perm_dummy(setdiff(1:numel(perm_dummy), all_lowperm_cells)) = nan;
+%perm_dummy(setdiff(1:numel(perm_dummy), all_added_layers)) = nan;
 plotCellData(G, log10(perm_dummy), 'EdgeColor', 'none');
 plotGrid(G, W.cells, 'FaceColor', 'blue', 'EdgeColor', 'none');
 colormap(autumn);
@@ -265,8 +159,8 @@ disp(model)
 
 %% Boundary conditions and schedule
 bc = []; % no-flux as default
-top_cells = G.cells.indexMap(z < min(z(all_lowperm_cells)));
-interior_cells = G.cells.indexMap(z >= min(z(all_lowperm_cells)));
+top_cells = G.cells.indexMap(z < min(z(all_added_layers)));
+interior_cells = G.cells.indexMap(z >= min(z(all_added_layers)));
 
 p_top = fluid.rhoWS * norm(gravity) * min(z);
 bc = pside(bc, G, 'Top', p_top, 'sat', [1 0]);
@@ -274,8 +168,8 @@ bc = pside(bc, G, 'Top', p_top, 'sat', [1 0]);
 pz = fluid.rhoWS * norm(gravity) * unique(z); % hydrostatic pressure in entire domain
 bc = pside(bc, G, 'Right', pz, 'sat', [1 0]);
 
-tot_time = 10000*day();
-dt = rampupTimesteps(tot_time, 50*day(), 10);
+tot_time = 8000*day();
+dt = rampupTimesteps(tot_time, 30*day(), 10);
 n_steps = numel(dt);
 
 schedule = simpleSchedule(dt, 'W', W, 'bc', bc);
@@ -292,16 +186,16 @@ state = initResSol(G, 100*barsa, [1,0]);
 t = 0;
 p_mean = zeros(max(kk), n_steps);
 
-lowperm_faces = zeros([size(all_lowperm_cells), 6]); % 6 faces in 3d cartesian coords
-for i=1:size(all_lowperm_cells)
-    icell_start = G.cells.facePos(all_lowperm_cells(i));
-    icell_stop = G.cells.facePos(all_lowperm_cells(i)+1)-1;
+lowperm_faces = zeros([size(all_added_layers), 6]); % 6 faces in 3d cartesian coords
+for i=1:size(all_added_layers)
+    icell_start = G.cells.facePos(all_added_layers(i));
+    icell_stop = G.cells.facePos(all_added_layers(i)+1)-1;
     lowperm_faces(i,:) = G.cells.faces(icell_start:icell_stop, 1);
 end
 
 f2 = UtilFunctions.fullsizeFig(2); % to hold saturations
 
-plotGrid(G, all_lowperm_cells, 'FaceColor', 'none', 'EdgeColor', 'black', 'EdgeAlpha', 0.2);
+plotGrid(G, all_added_layers, 'FaceColor', 'none', 'EdgeColor', 'black', 'EdgeAlpha', 0.2);
 plotCellData(G, state.s(:,1), 'EdgeColor', 'none');
 plotGrid(G, W.cells, 'FaceColor', 'black', 'EdgeColor', 'none');
 colormap(flipud(winter)); colorbar; caxis([0, 1]);
@@ -314,12 +208,12 @@ saveas(f2, strcat(plot_dir, '/sat_0'), 'png');
 
 f3 = UtilFunctions.fullsizeFig(3); % to hold cap pressure
 
-plotGrid(G, all_lowperm_cells, 'FaceColor', 'none', 'EdgeColor', 'black', 'EdgeAlpha', 0.2);
+plotGrid(G, all_added_layers, 'FaceColor', 'none', 'EdgeColor', 'black', 'EdgeAlpha', 0.2);
 %pc_test = fluid.pcOW(state.s(:,1), perm);
-fluid.pcOW(state.s(:,1) == 1) = 0;
+%fluid.pcOW(state.s(:,1) == 1) = 0;
 plotCellData(G, fluid.pcOW(state.s(:,1)), 'EdgeColor', 'none');
 plotGrid(G, W.cells, 'FaceColor', 'black', 'EdgeColor', 'none');
-colorbar; caxis([0, 2*p_e]);
+colorbar; caxis([0, plot_pc_lim]);
 title({'Capillary pressure (Pascal)' ['Time: ', formatTimeRange(t)]});
 axis equal tight
 view([0, 0])
@@ -348,7 +242,7 @@ for i=1:numel(states)
     
     S = states{i}.s(:,1);
     assert(max(S) < 1+eps && min(S) > -eps);
-    fluid.pcOW(S == 1) = 0;
+    %fluid.pcOW(S == 1) = 0;
     
     p = reshape(states{i}.pressure, [max(ii), max(kk)]);
     p_mean(:,i) = mean(p, 1).';    
@@ -371,7 +265,7 @@ for i=1:numel(states)
        set(f3, 'visible', 'off');
        plotCellData(G, fluid.pcOW(S), 'EdgeColor', 'none');
        plotGrid(G, W.cells, 'FaceColor', 'black', 'EdgeColor', 'none'); 
-       colorbar; caxis([0, 2*p_e]);
+       colorbar; caxis([0, plot_pc_lim]);
        title({'Capillary pressure (Pascal)' ['Time: ', formatTimeRange(t)]});
        axis equal tight
        view([0, 0])
@@ -575,4 +469,23 @@ Sw = linspace(0, 1, 10).';
 Kw = linspace(10*milli*darcy, 100*milli*darcy, 10).';
 [Sw, Kw] = ndgrid(Sw, Kw);
 
-J_vals = UtilFunctions.LeverettJ(Sw, 0.15, 0.2, 0.5, Kw, 2, 1.149, 0.1549, 0, 0.994, 65.0);
+%J_vals = UtilFunctions.LeverettJ(Sw, 0.15, 0.2, 0.5, Kw, 2, 1.149, 0.1549, 0, 0.994, 65.0);
+
+%% Functions
+function pc = runStandardPc(S, dummy_S, swr, snr, p_e, p_cap, layers, G)
+    pc_vals = UtilFunctions.PcNew(dummy_S, swr, snr, p_e, p_cap, 2);
+
+    region_table = {[dummy_S, zeros(numel(dummy_S), 1)], [dummy_S, pc_vals]}; % container for pc values in each region
+    region_idx = {setdiff(G.cells.indexMap, layers).', layers}; % region to interpolate (rest, lowperm)
+    pc = interpReg(region_table, S, region_idx);
+end
+
+function pc = runLeverettJ_2D(S, dummy_S, phi, K, dummy_K, K_base, layers, G)
+    [grid_Sw, grid_K] = ndgrid(dummy_S, dummy_K);
+    pc_vals = UtilFunctions.LeverettJ(grid_Sw, phi, grid_K, K_base);
+    
+    region_table = {{grid_Sw, grid_K, zeros(size(grid_Sw))}, ...
+                     {grid_Sw, grid_K,  pc_vals}}; % container for pc values in each region
+    region_idx = {setdiff(G.cells.indexMap, layers).', layers}; % region to interpolate (rest, lowperm)
+    pc = interpReg2D(region_table, S, K, region_idx);
+end

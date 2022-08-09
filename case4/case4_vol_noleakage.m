@@ -7,10 +7,10 @@
 mrstModule add incomp ad-core ad-blackoil ad-props mrst-gui test-suite
 ROOTDIR = strrep(ROOTDIR, '\', '/');
 seed = rng();
-seed.Seed = 6551; % Must set here, otherwise not updated
+seed.Seed = 3047; % Must set here, otherwise not updated
 
 %% Define 2D grid
-nx = 75; ny = 1; nz = 60; % 100 50
+nx = 60; ny = 1; nz = 40; % 100 50
 lx = 800; ly = 1; lz = 400; % 1000 350
 dims = [nx ny nz];
 gridsize = [lx, ly, lz]*meter;
@@ -21,7 +21,7 @@ G = computeGeometry(G);
 [ii, jj, kk] = gridLogicalIndices(G);
 x = G.cells.centroids(:,1);
 z = G.cells.centroids(:,3);
-dz = mean(diff(z)); % average cell spacing z-dir
+dx = mode(diff(x));
 
 %% Define rock and fluid objects
 lowperm = 20*milli*darcy;
@@ -32,10 +32,10 @@ poro = 0.3;
 %% Directories
 n_lowperm_layers = 15;
 n_imperm_layers = round(n_lowperm_layers/3);
-leaked_perc = 0.0; % allow X*100% leakage
+leaked_perc = 0.10; % allow X*100% leakage
 
-plot_base_dir = strcat(ROOTDIR, '../summer_sintef/case4/plots_optimal');
-data_base_dir = strcat(ROOTDIR, '../summer_sintef/case4/data_optimal');
+plot_base_dir = strcat(ROOTDIR, '../summer_sintef/case4/plots_optimal_test');
+data_base_dir = strcat(ROOTDIR, '../summer_sintef/case4/data_optimal_test');
 leaked_perc_str = erase(string(leaked_perc), '.');
 plot_dir = sprintf(strcat(plot_base_dir, '/lp_%s/layers_%d'), leaked_perc_str, n_lowperm_layers);
 data_dir = sprintf(strcat(data_base_dir, '/lp_%s/layers_%d'), leaked_perc_str, n_lowperm_layers);
@@ -47,30 +47,40 @@ perc_val = @(arr, perc, varargin) perc*(max(arr) - min(arr)) + min(arr);
 x_start = struct; x_stop = struct;
 z_start = struct; z_stop = struct;
 
-rand_x_start = linspace(perc_val(x, 0.0), perc_val(x, 0.9), n_lowperm_layers+n_imperm_layers);
-rand_x_start = rand_x_start(randperm(length(rand_x_start))); % random permute
+rand_x_mid = linspace(min(x)-dx/2, max(x)+dx/2, n_lowperm_layers+n_imperm_layers); % dx/2 to move from centroid to endpoint
+rand_x_mid = rand_x_mid(randperm(length(rand_x_mid))); % random permute
 
-x_start.lowperm = rand_x_start(1:n_lowperm_layers);
-x_start.imperm = rand_x_start(n_lowperm_layers+1:n_lowperm_layers+n_imperm_layers);
+x_start.lowperm = rand_x_mid(1:n_lowperm_layers);
+x_start.imperm = rand_x_mid(n_lowperm_layers+1:n_lowperm_layers+n_imperm_layers);
 
-x_stop.lowperm = x_start.lowperm + randi([round(perc_val(x, 0.1)), ...
+x_length_lowperm = randi([round(perc_val(x, 0.1)), ...
                                     round(perc_val(x, 0.4))], ...
                                     [n_lowperm_layers, 1]).';
-x_stop.imperm = x_start.imperm + randi([round(perc_val(x, 0.1)), ...
+
+x_start.lowperm = rand_x_mid(1:n_lowperm_layers) - round(x_length_lowperm/2);
+x_stop.lowperm = rand_x_mid(1:n_lowperm_layers) + round(x_length_lowperm/2);
+                                
+x_length_imperm = randi([round(perc_val(x, 0.1)), ...
                                     round(perc_val(x, 0.4))], ...
                                     [n_imperm_layers, 1]).';
                                 
-x_stop.lowperm = min(x_stop.lowperm, round(perc_val(x, 1))); % prevent layer going out of bounds
-x_stop.imperm = min(x_stop.imperm, round(perc_val(x, 1)));
+x_start.imperm = rand_x_mid(n_lowperm_layers+1:n_lowperm_layers+n_imperm_layers) - round(x_length_imperm/2);
+x_stop.imperm = rand_x_mid(n_lowperm_layers+1:n_lowperm_layers+n_imperm_layers) + round(x_length_imperm/2);
+                                
+% prevent layers going out of bounds
+x_start.lowperm = max(x_start.lowperm, round(min(x)-dx/2));
+x_start.imperm = max(x_start.imperm, round(min(x)-dx/2));
+x_stop.lowperm = min(x_stop.lowperm, round(max(x)+dx/2));
+x_stop.imperm = min(x_stop.imperm, round(max(x)+dx/2));
 
 anticline_idx = 1:3:(n_lowperm_layers+n_imperm_layers); % every third layer is anticline
 
 line_idx = setdiff(1:(n_lowperm_layers+n_imperm_layers), anticline_idx); % indices for line layers
 
 rand_z_start = linspace(perc_val(z, 0.05), perc_val(z, 0.9), n_lowperm_layers+n_imperm_layers);
-rand_z_start = rand_z_start(randperm(length(rand_z_start)));
-z_start.lowperm = rand_z_start(1:n_lowperm_layers);
-z_start.imperm = rand_z_start(n_lowperm_layers+1:n_lowperm_layers+n_imperm_layers);
+z_start.lowperm = sort(randsample(rand_z_start, n_lowperm_layers));
+rand_z_start(ismember(rand_z_start, z_start.lowperm)) = [];
+z_start.imperm = sort(rand_z_start);
 
 z_stop.lowperm = z_start.lowperm + perc_val(z, 0.02);
 z_stop.imperm = z_start.imperm + perc_val(z, 0.02);
@@ -78,12 +88,19 @@ z_stop.imperm = z_start.imperm + perc_val(z, 0.02);
 %% Generate layers
 added_layers = {[], []};
 layer_types = {'lowperm', 'imperm'};
-anticline_idxs = {anticline_idx(1:round(n_lowperm_layers/(n_lowperm_layers+n_imperm_layers)*length(anticline_idx))), ...
-                    anticline_idx(round(n_lowperm_layers/(n_lowperm_layers+n_imperm_layers)*length(anticline_idx))+1:end) ...
-                     - n_lowperm_layers};
-line_idxs = {line_idx(1:round(n_lowperm_layers/(n_lowperm_layers+n_imperm_layers)*length(line_idx))), ...
-                    line_idx(round(n_lowperm_layers/(n_lowperm_layers+n_imperm_layers)*length(line_idx))+1:end) ...
-                     - n_lowperm_layers};                
+
+anticline_idx_lowperm = anticline_idx(1:round(n_lowperm_layers/(n_lowperm_layers+n_imperm_layers)*length(anticline_idx)));
+anticline_idx_lowperm(anticline_idx_lowperm > n_lowperm_layers) = []; % remove invalid values
+anticline_idx_imperm = anticline_idx(find(anticline_idx == anticline_idx_lowperm(end))+1:end) - n_lowperm_layers;
+
+anticline_idxs = {anticline_idx_lowperm, anticline_idx_imperm};
+
+line_idx_lowperm = line_idx(1:round(n_lowperm_layers/(n_lowperm_layers+n_imperm_layers)*length(line_idx)));
+line_idx_lowperm(line_idx_lowperm > n_lowperm_layers) = []; % remove invalid values
+line_idx_imperm = line_idx(find(line_idx == line_idx_lowperm(end))+1:end) - n_lowperm_layers;
+
+line_idxs = {line_idx_lowperm, line_idx_imperm};
+
 perm_vals = {lowperm, 1e-5*milli*darcy};                
 
 trapped_cells = {}; % structural trapping
@@ -215,15 +232,21 @@ hold off
 dummy_Sw = linspace(0, 1, G.cells.num)';
 p_e = 0.5*barsa;
 p_cap = 3*barsa;
-pc_vals = UtilFunctions.Pc(dummy_Sw, swr, p_e, p_cap, 2);
 
-region_table = {[dummy_Sw, zeros(numel(dummy_Sw), 1)], [dummy_Sw, pc_vals]}; % container for pc values in each region
-region_idx = {setdiff(G.cells.indexMap, all_added_layers).', all_added_layers}; % region to interpolate (rest, lowperm)
-fluid.pcOW = @(S, varargin) interpReg(region_table, S, region_idx); % in both regions, interpolate over saturations S
-% or using Leverett-J pc to account for differences in permeability
+median_pc = 1*barsa;
+%S_scaled = max((1-dummy_Sw-swr)./(1-swr), 1e-5);
+standard_pc = 1;
+
+if standard_pc
+    plot_pc_lim = p_cap;
+    fluid.pcOW = @(S, varargin) runStandardPc(S, dummy_Sw, swr, snr, p_e, p_cap, all_added_layers, G);
+else
+    plot_pc_lim = 5*median_pc;
+    fluid.pcOW = @(S, varargin) Capillary.LeverettJ(S, poro, perm, baseperm, median_pc);
+end
 
 figure(1);
-plot(dummy_Sw, pc_vals, 'LineWidth', 1.5);
+plot(dummy_Sw, fluid.pcOW(dummy_Sw), 'LineWidth', 1.5);
 xlabel('Water saturation');
 title('Capillary pressure function');
 saveas(f1, strcat(plot_dir, '/cap_pres'), 'png');
@@ -291,7 +314,7 @@ pz = fluid.rhoWS * norm(gravity) * unique(z); % hydrostatic pressure in entire d
 bc = pside(bc, G, 'Right', pz, 'sat', [1 0]);
 
 tot_time = 16000*day();
-dt = rampupTimesteps(tot_time, 75*day(), 10);
+dt = rampupTimesteps(tot_time, 70*day(), 10);
 
 inj_years = regexp(formatTimeRange(tot_time), '\d+ Years', 'match');
 years = strrep(inj_years, ' ', '_');
@@ -319,7 +342,7 @@ f4 = UtilFunctions.fullsizeFig(4); % to hold cap pressure
 plotGrid(G, all_added_layers, 'FaceColor', 'none', 'EdgeColor', 'black', 'EdgeAlpha', 0.2);
 plotCellData(G, fluid.pcOW(state.s(:,1)), 'EdgeColor', 'none');
 plotGrid(G, dummyW.cells, 'FaceColor', 'black', 'EdgeColor', 'none');
-colorbar; caxis([0, 2*p_e]);
+colorbar; caxis([0, plot_pc_lim]);
 title({'Capillary pressure (Pascal)' ['Time: ', formatTimeRange(t)]});
 axis equal tight
 view([0, 0])
@@ -348,7 +371,7 @@ dt_plot = cat(1, repmat(5, [fix(numel(states)/4), 1]), ...
 for i=1:numel(states)
     t = t + dt(i);   
 
-    if ~mod(i, 10)
+    if ~mod(i, 20)
         figure(3)
         set(f3, 'visible', 'off');
         plotCellData(G, states{i}.s(:,1), 'EdgeColor', 'none');
@@ -366,7 +389,7 @@ for i=1:numel(states)
         set(f4, 'visible', 'off');
         plotCellData(G, fluid.pcOW(states{i}.s(:,1)), 'EdgeColor', 'none');
         plotGrid(G, dummyW.cells, 'FaceColor', 'black', 'EdgeColor', 'none'); 
-        colorbar; caxis([0, 2*p_e]);
+        colorbar; caxis([0, plot_pc_lim]);
         title({'Capillary pressure (Pascal)' ['Time: ', formatTimeRange(t)]});
         axis equal tight
         view([0, 0])
@@ -403,6 +426,7 @@ plot(plot_rates, max_volumes, 'black');
 
 xlabel('Iterations');
 ylabel('Volume (m^3)');
+xlim([0, plot_rates(end)+1]);
 title({'Optimizing total CO2 volume, injecting for', formatTimeRange(tot_time), sprintf('Green: below %.1f %% leakage. Red: above %.1f %% leakage.', leaked_perc*100, leaked_perc*100)});
 drawnow
 saveas(f5, strcat(plot_dir, '/opt_vol_search_', date), 'png');
@@ -432,7 +456,7 @@ lp_folders = UtilFunctions.sortStructByField(lp_folders, 'name');
 num_lp = numel(lp_folders);
 num_layers = zeros(num_lp, 1);
 
-used_lab = {{}, {{}}}; % first: percentage leakage, second: num layers
+used_lab = {{}, {}}; % first: percentage leakage, second: num layers
 unique_lab_idx = {[], []};
 
 structural_struct = struct;
@@ -443,7 +467,7 @@ inj_struct = struct;
 for i=1:num_lp
     lab_leaked = regexp(lp_folders(i).name, 'lp_\d+', 'match');     
     used_lab{1} = cat(2, used_lab{1}, lab_leaked{1});
-    %unique_lab_idx{1} = cat(2, unique_lab_idx{1}, i);
+    used_lab{2}{i} = {};
     
     %if lab_leaked{1} == leaked_perc_str % only plot layer configuration for current leaked percentage               
     layer_folders = dir(strcat(lp_folders(i).folder, '/', lp_folders(i).name, '/layers_*'));  
@@ -453,14 +477,14 @@ for i=1:num_lp
     for j=1:num_layers(i)
         lab_layers = regexp(layer_folders(j).name, 'layers_\d+', 'match');
         %if ~any(ismember(used_lab{2}{i}, lab_layers{1}))
-        used_lab{2}{i} = cat(2, used_lab{2}{i}, lab_layers{1});      
+        used_lab{2}{i} = cat(1, used_lab{2}{i}, lab_layers{1});      
         
         inj_files = dir(strcat(layer_folders(j).folder, '/', layer_folders(j).name, '/inj_rate_*.mat'));
         inj_struct.(lab_leaked{1}).(lab_layers{1}) = [];
         
         for k=1:numel(inj_files)
             load_injrate = load(strcat(inj_files(k).folder, '\', inj_files(k).name), 'inj_rate');
-            inj_struct.(lab_leaked{1}).(lab_layers{1}) = cat(1, inj_struct.(lab_leaked{1}).(lab_layers{1}), load_injrate.inj_rate);
+            inj_struct.(lab_leaked{1}).(lab_layers{1}) = cat(1, inj_struct.(lab_leaked{1}).(lab_layers{1}), load_injrate.inj_rate * days/seconds); % NB: units of m^3/day
         end
 
         structural_files = dir(strcat(layer_folders(j).folder, '/', layer_folders(j).name, '/struct_*.mat'));
@@ -488,7 +512,7 @@ end
 %% Plot optimal injection rate across lp's
 % Compute mean and variance for each num layers
 mean_lp = struct;
-var_lp = struct;
+std_lp = struct;
 ticks = {};
 
 for i=1:num_lp
@@ -497,74 +521,83 @@ for i=1:num_lp
     for j=1:num_layers(i)
         layer_lab = used_lab{2}{i}(j);
         mean_lp.(layer_lab{1}).(lp_lab{1}) = mean(inj_struct.(lp_lab{1}).(layer_lab{1}), 1);
-        var_lp.(layer_lab{1}).(lp_lab{1}) = var(inj_struct.(lp_lab{1}).(layer_lab{1}), 0, 1);
-
+        std_lp.(layer_lab{1}).(lp_lab{1}) = std(inj_struct.(lp_lab{1}).(layer_lab{1}), 0, 1);
     end
 end
 
 
 f6 = figure(6);
 fields_layers = fieldnames(mean_lp);
+clr = {'blue', 'red', 'green', 'magenta', 'orange'};
+linSmean = {'-^', '-o', '-x', '-p'};
+linSstd = {'--^', '--o', '--x', '--p'};
+markS = [6, 6, 10, 5];
+
 for i=1:numel(fields_layers)
-    plot(1:numel(mean_lp.(fields_layers{i})), struct2array(mean_lp.(fields_layers{i})), ...
-        '--.', 'MarkerSize', 15, 'DisplayName', strrep(fields_layers{i}, '_', ' '));
-    hold on    
+    mean_lp_layer = mean_lp.(fields_layers{i});
+    std_lp_layer = std_lp.(fields_layers{i});
+    num_lp_layer = numel(fieldnames(mean_lp_layer)); % number of unique leakage percentages for this layer
+    yyaxis left
+    plot(1:num_lp_layer, struct2array(mean_lp_layer), linSmean{i}, 'Color', 'blue', ...
+        'MarkerSize', markS(i), 'MarkerFaceColor', 'blue', 'DisplayName', ['mean: ', strrep(fields_layers{i}, 'layers_', '')]);
+    ylabel('Mean (m^3/day)');
+    hold on
+    yyaxis right
+    plot(1:num_lp_layer, struct2array(std_lp_layer), linSstd{i}, 'Color', 'red', ...
+        'MarkerSize', markS(i), 'MarkerFaceColor', 'red', 'DisplayName', ['std: ', strrep(fields_layers{i}, 'layers_', '')]);
+    ylabel('Std (m^3/day)');
 end
 
-xlabel('Allowed leakage (percentage)')
-ylabel('Rate (m^3/s)')
+xlabel('Allowed leakage (ratio)')
 xticks(1:num_lp);
 xticklabels(ticks);
 
 tot_time_cut = regexp(formatTimeRange(tot_time), '.+?Days', 'match');
 inj_time_cut = regexp(formatTimeRange(tot_time*inj_stop_rate), '.+?Days', 'match');
 title({'Optimal injection rate to satifsy given leakage amount.', ...
-        strcat('Simulation time: ', tot_time_cut{1}), ...
-        strcat('Injection time: ', inj_time_cut{1})})
-legend();    
+        ['Simulation time: ', tot_time_cut{1}], ...
+        ['Injection time: ', inj_time_cut{1}]})
+legend('Location', 'northwest');
 drawnow
 
 saveas(f6, strcat(plot_base_dir, '/all_optimal_rates'), 'png');
-    
 
 %% Plot volume distributions
 fm = 7;
-fig_mean = figure(fm);
 fv = 8;
-fig_var = figure(fv);
-
 linS = {'-', '--', ':', '-o', '--o'};
 
-for i=1:num_lp % one figure for each lp
+for i=1:num_lp % one figure for each lp  
     mean_layers = struct;
-    var_layers = struct;
+    std_layers = struct;
     
     lp_lab = used_lab{1}(i);
     lp_perc = strrep(lp_lab{1}, 'lp_0', '0.');
     for j=1:num_layers(i)
         layer_lab = used_lab{2}{i}(j);
         mean_layers.structural.(layer_lab{1}) = mean(structural_struct.(lp_lab{1}).(layer_lab{1}), 2);
-        var_layers.structural.(layer_lab{1}) = var(structural_struct.(lp_lab{1}).(layer_lab{1}), 0, 2);
+        std_layers.structural.(layer_lab{1}) = std(structural_struct.(lp_lab{1}).(layer_lab{1}), 0, 2);
         mean_layers.free.(layer_lab{1}) = mean(free_struct.(lp_lab{1}).(layer_lab{1}), 2);
-        var_layers.free.(layer_lab{1}) = var(free_struct.(lp_lab{1}).(layer_lab{1}), 0, 2);
+        std_layers.free.(layer_lab{1}) = std(free_struct.(lp_lab{1}).(layer_lab{1}), 0, 2);
         mean_layers.residual.(layer_lab{1}) = mean(residual_struct.(lp_lab{1}).(layer_lab{1}), 2);
-        var_layers.residual.(layer_lab{1}) = var(residual_struct.(lp_lab{1}).(layer_lab{1}), 0, 2);
+        std_layers.residual.(layer_lab{1}) = std(residual_struct.(lp_lab{1}).(layer_lab{1}), 0, 2);
         
         %t = 1:numel(mean_layers.structural.(layer_lab{1}));
         figure(fm);
         hold on      
-        plot(mean_layers.structural.(layer_lab{1}), linS{j}, 'Color', 'blue', 'DisplayName', ['Structural: ', strrep(layer_lab{1}, '_', ' ')], 'LineWidth', 1.5);      
-        plot(mean_layers.residual.(layer_lab{1}), linS{j}, 'Color', 'red', 'DisplayName', ['Residual: ', strrep(layer_lab{1}, '_', ' ')], 'LineWidth', 1.5); 
-        plot(mean_layers.free.(layer_lab{1}), linS{j}, 'Color', 'green', 'DisplayName', ['Free: ', strrep(layer_lab{1}, '_', ' ')], 'LineWidth', 1.5); 
+        plot(mean_layers.structural.(layer_lab{1}), linS{j}, 'Color', 'blue', 'DisplayName', ['S: ', strrep(layer_lab{1}, 'layers_', '')], 'LineWidth', 1.5);      
+        plot(mean_layers.residual.(layer_lab{1}), linS{j}, 'Color', 'red', 'DisplayName', ['R: ', strrep(layer_lab{1}, 'layers_', '')], 'LineWidth', 1.5); 
+        plot(mean_layers.free.(layer_lab{1}), linS{j}, 'Color', 'green', 'DisplayName', ['F: ', strrep(layer_lab{1}, 'layers_', '')], 'LineWidth', 1.5); 
         
         figure(fv);
         hold on
-        plot(var_layers.structural.(layer_lab{1}), 'Color', 'blue', 'DisplayName', ['Structural: ', strrep(layer_lab{1}, '_', ' ')], 'LineWidth', 1.5);
-        plot(var_layers.residual.(layer_lab{1}), 'Color', 'red', 'DisplayName', ['Residual: ', strrep(layer_lab{1}, '_', ' ')], 'LineWidth', 1.5);
-        plot(var_layers.free.(layer_lab{1}), 'Color', 'green', 'DisplayName', ['Free: ', strrep(layer_lab{1}, '_', ' ')], 'LineWidth', 1.5);
+        plot(std_layers.structural.(layer_lab{1}), linS{j}, 'Color', 'blue', 'DisplayName', ['S: ', strrep(layer_lab{1}, 'layers_', '')], 'LineWidth', 1.5);
+        plot(std_layers.residual.(layer_lab{1}), linS{j}, 'Color', 'red', 'DisplayName', ['R: ', strrep(layer_lab{1}, 'layers_', '')], 'LineWidth', 1.5);
+        plot(std_layers.free.(layer_lab{1}), linS{j}, 'Color', 'green', 'DisplayName', ['F: ', strrep(layer_lab{1}, 'layers_', '')], 'LineWidth', 1.5);
                
     end
     
+    fig_mean = figure(fm);
     figure(fm)
     xlabel('Time step')
     ylabel('Volume (m^3)')
@@ -572,18 +605,36 @@ for i=1:num_lp % one figure for each lp
     legend('Location', 'northwest')  
     saveas(fig_mean, sprintf(strcat(plot_base_dir, '/lp_%s/mean_trapping'), leaked_perc_str), 'png');
     
+    fig_var = figure(fv);
     figure(fv)
     xlabel('Time step')
     ylabel('Volume (m^3)')
-    title({'Variance of volume distribution.', ['Allowing ', lp_perc, ' rate of leakage.']}) 
-    legend()
+    title({'Standard deviation of volume distribution.', ['Allowing ', lp_perc, ' rate of leakage.']}) 
+    legend('Location', 'northwest')
     saveas(fig_var, sprintf(strcat(plot_base_dir, '/lp_%s/var_trapping'), leaked_perc_str), 'png')
     
     fm = fm + 2;
-    fig_mean = figure(fm);
     fv = fv + 2;
-    fig_var = figure(fv);
 end
 
 
 %% TESTING
+
+%% Functions
+function pc = runStandardPc(S, dummy_S, swr, snr, p_e, p_cap, layers, G)
+    pc_vals = Capillary.PcNew(dummy_S, swr, snr, p_e, p_cap, 2);
+
+    region_table = {[dummy_S, zeros(numel(dummy_S), 1)], [dummy_S, pc_vals]}; % container for pc values in each region
+    region_idx = {setdiff(G.cells.indexMap, layers).', layers}; % region to interpolate (rest, lowperm)
+    pc = interpReg(region_table, S, region_idx);
+end
+
+function pc = runLeverettJ_2D(S, dummy_S, phi, K, dummy_K, K_base, layers, G)
+    [grid_Sw, grid_K] = ndgrid(dummy_S, dummy_K);
+    pc_vals = Capillary.LeverettJ(grid_Sw, phi, grid_K, K_base);
+    
+    region_table = {{grid_Sw, grid_K, zeros(size(grid_Sw))}, ...
+                     {grid_Sw, grid_K,  pc_vals}}; % container for pc values in each region
+    region_idx = {setdiff(G.cells.indexMap, layers).', layers}; % region to interpolate (rest, lowperm)
+    pc = interpReg2D(region_table, S, K, region_idx);
+end
