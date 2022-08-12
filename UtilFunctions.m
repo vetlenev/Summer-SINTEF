@@ -30,6 +30,17 @@ classdef UtilFunctions
            sorted_tab = sortrows(tab, fieldname);
            sorted_struct = table2struct(sorted_tab);
        end       
-           
+       
+       function [cutted_cells] = cutLayer(grid, cells, hole_min, hole_max, layer_type, layer_idx)
+            hole_start = min(grid.X) + rand(1)*((1-hole_min)*max(grid.X)-min(grid.X));
+            hole_stop = hole_start + max(grid.X)*(hole_min + rand(1)*(hole_max - hole_min)); 
+
+            holes = grid.G.cells.indexMap(grid.X >= hole_start & ...
+                                        grid.X <= hole_stop & ...
+                                        grid.Z > grid.zStart.(layer_type)(layer_idx) & ...
+                                        grid.Z < grid.zStop.(layer_type)(layer_idx));
+
+            cutted_cells = grid.G.cells.indexMap(setdiff(cells, holes));
+       end
    end
 end

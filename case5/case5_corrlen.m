@@ -7,12 +7,11 @@
 mrstModule add incomp ad-core ad-blackoil ad-props mrst-gui test-suite
 ROOTDIR = strrep(ROOTDIR, '\', '/');
 
-my_seed = 5222;
+my_seed = 3573;
 
 %% Set simulation settings
 param_name = 'corrlen';
-params = logspace(1, 3, 5);
-n_layers = 40;
+n_layers = 26;
 
 %% Define 2D grid
 nx = 60; ny = 1; nz = 40; % 100 50
@@ -27,12 +26,21 @@ x = G.cells.centroids(:,1);
 z = G.cells.centroids(:,3);
 
 %% Define rock and fluid objects
-lowperm = 10*milli*darcy;
+lowperm = 1*milli*darcy;
 baseperm = 100*milli*darcy;
 perms = {lowperm, baseperm};
 
 poro = 0.3;
 gravity reset on
+
+%% Set parameters
+%corr_len_x = mean(grid.xStop.lowperm - grid.xStart.lowperm) ./ params;
+corr_len_x = [27, 11, 5, 3, 1];
+%corr_len_z = mean(grid.zStop.lowperm - grid.zStart.lowperm) ./ (params*0.5);
+corr_len_z = [19, 7, 5, 3, 1];
+
+params = 1:numel(corr_len_x);
+plot_sat = params(1:2:end);
 
 %% Directories
 n_lowperm_layers = ceil(n_layers/2); 
@@ -50,11 +58,12 @@ seed = UtilFunctions.setSeed(data_dir, my_seed);
 rng(seed)
 
 %% Set up grid object with layers
-grid = GridSetupCase5(G, n_lowperm_layers, n_imperm_layers, perms);
+grid = GridSetupParams(G, n_lowperm_layers, n_imperm_layers, perms);
 
 [line_idx, anticline_idx] = grid.DefineLayers();
 
 grid.angle = pi/4;
+grid.log_min = 0.05; grid.log_max = 100;
 % grid.corr_len_x = mean(x_stop.lowperm - x_start.lowperm) / 100;
 % grid.corr_len_z = mean(z_stop.lowperm - z_start.lowperm) / 10;
 
@@ -66,13 +75,8 @@ all_lowperm_layers = added_layers{2};
 all_lowperm_layers = vertcat(all_lowperm_layers{:});
 all_imperm_layers = added_layers{1};
 all_imperm_layers = vertcat(all_imperm_layers{:});
-all_added_layers = vertcat(added_layers{:});
+all_added_layers = [added_layers{:}];
 all_added_layers = vertcat(all_added_layers{:});
-
-%% Set parameters
-corr_len_x = mean(grid.xStop.lowperm - grid.xStart.lowperm) ./ params;
-corr_len_z = mean(grid.zStop.lowperm - grid.zStart.lowperm) ./ params;
-plot_sat = params(1:2:end);
                                                     
 %% Compute fluid objects
 swr = 0.15;
@@ -102,10 +106,10 @@ clf;
                        
 %% Define capillary pressure
 dummy_Sw = linspace(0, 1, grid.G.cells.num)';
-p_e = 0.5*barsa;
-p_cap = 3*barsa;
+p_e = 1*barsa;
+p_cap = 4*barsa;
 
-median_pc = 2*barsa;
+median_pc = 0.5*barsa;
 %S_scaled = max((1-dummy_Sw-swr)./(1-swr), 1e-5);
 standard_pc = 0;
 
@@ -169,7 +173,7 @@ params_str = cell(1, numel(params));
 
 for p=1:numel(params)  
     grid.corr_len_x =  corr_len_x(p);
-    grid.corr_len_z = corr_len_z(p);
+    grid.corr_len_z = corr_len_z(p);       
 
     [new_trapped_cells] = grid.SetPermeability(added_layers, trapped_cells, ...
                                         line_idxs, anticline_idxs, ...
@@ -181,8 +185,6 @@ for p=1:numel(params)
     % Compute rock properties
     rock = makeRock(grid.G, grid.Perm, poro);
     T = computeTrans(grid.G, rock, 'Verbose', true);
-    % Define model
-    model = TwoPhaseOilWaterModel(grid.G, rock, fluid);
     
     % Domain-specific capillary pressure
     if standard_pc
@@ -192,6 +194,9 @@ for p=1:numel(params)
         plot_pc_lim = 5*median_pc;
         fluid.pcOW = @(S, varargin) Capillary.LeverettJ(S, poro, grid.Perm, baseperm, median_pc);
     end
+    
+    % Define model
+    model = TwoPhaseOilWaterModel(grid.G, rock, fluid);       
 
     % Plot permeability field
     figure(1)
@@ -253,9 +258,9 @@ end
 
 %% Show solution for one of params
 %show_param = params(randi([1 numel(params)]));
-for p=1:numel(plot_sat)
+for p=plot_sat
 
-    show_param_idx = strcat('p', string(find(params == plot_sat(p))));
+    show_param_idx = strcat('p', string(find(params == p)));
     show_states = allResults.states.(show_param_idx);
     show_leaked_boundary = allResults.leaked_boundary.(show_param_idx);
 
@@ -349,18 +354,8 @@ for j=1:num_layers
     residual_files = dir(strcat(layer_folders(j).folder, '/', layer_folders(j).name, '/residual_*.mat'));
     exit_files = dir(strcat(layer_folders(j).folder, '/', layer_folders(j).name, '/exit_*.mat'));
 
-%     for p=1:numel(params)
-%         p_idx = strcat('p', string(find(params == params(p))));
-%         
-%         structural_struct.imperm.(lab_layers{1}).(p_idx) = [];
-%         structural_struct.lowperm.(lab_layers{1}).(p_idx) = [];
-%         free_struct.(lab_layers{1}).(p_idx) = [];
-%         residual_struct.(lab_layers{1}).(p_idx) = [];          
-%         exit_struct.(lab_layers{1}).(p_idx) = [];  
-%     end
-%     
     for k=1:numel(free_files) % every seed
-        get_seed = regexp(free_files(k), '\d+', 'match');
+        get_seed = regexp(free_files(k).name, '\d+', 'match');
         get_seed = strcat('s', get_seed{1});
         
         load_structural = load(strcat(structural_files(k).folder, '\', structural_files(k).name), 'structural_vol');
@@ -375,118 +370,201 @@ for j=1:num_layers
         for p=1:numel(params)
             p_idx = strcat('p', string(find(params == params(p))));
             
-            structural_struct.imperm.(lab_layers{1}).(p_idx) = cat(2, structural_struct.imperm.(lab_layers{1}).(p_idx), ...
-                                                                    load_structural.(p_idx).imperm);             
-            structural_struct.lowperm.(lab_layers{1}).(p_idx) = cat(2, structural_struct.lowperm.(lab_layers{1}).(p_idx), ...
-                                                                    load_structural.(p_idx).lowperm);
-                                                                
-            free_struct.(lab_layers{1}).(p_idx) = cat(2, free_struct.(lab_layers{1}).(p_idx), ...
-                                                                load_free.(p_idx));        
-            residual_struct.(lab_layers{1}).(p_idx) = cat(2, residual_struct.(lab_layers{1}).(p_idx), ...
-                                                                   load_residual.(p_idx));
-            exit_struct.(lab_layers{1}).(p_idx) = cat(2, exit_struct.(lab_layers{1}).(p_idx), ...
-                                                                   load_exit.(p_idx));
+            structural_struct.imperm.(lab_layers{1}).(p_idx).(get_seed) = load_structural.(p_idx).imperm;             
+            structural_struct.lowperm.(lab_layers{1}).(p_idx).(get_seed) = load_structural.(p_idx).lowperm;
+                                                                                                  
+            free_struct.(lab_layers{1}).(p_idx).(get_seed) = load_free.(p_idx);   
+            residual_struct.(lab_layers{1}).(p_idx).(get_seed) = load_residual.(p_idx);
+            exit_struct.(lab_layers{1}).(p_idx).(get_seed) = load_exit.(p_idx);
         end
     end
 end
 
 
-%% Plot volume distributions
+%% Plot mean trapping distributions
 fm = 7;
-fs = 8;
 linS = {'-', '--', ':', '-o', '--o'};
+mycolors = [0 0.5 1; 0.5 0 1; 0 0.5 0; 1 0.647 0; 1 0 0];
+%mycolors = {'blue', 'cyan', 'green', 'yellow', 'red'};             
 
 mean_params = struct;
-std_params = struct;
+std_params = struct; % 3 figures (one per layer)
+std_layers = struct; % 5 figures (one per param)
       
 log_time = vertcat(0, cumsum(dt)*second()/year());
 this_layer = strcat('layers_', string(n_layers));
 
-for p=1:numel(params)
-    p_idx = strcat('p', string(find(params == params(p))));
+for l=1:num_layers
+    layer = used_lab(l);
+    layer = layer{1};
+    for p=1:numel(params)
+        p_idx = strcat('p', string(find(params == params(p))));
 
-    mean_params.structural.imperm.(p_idx) = mean(structural_struct.imperm.(this_layer).(p_idx), 2);        
-    mean_params.structural.lowperm.(p_idx) = mean(structural_struct.lowperm.(this_layer).(p_idx), 2);
-    mean_params.free.(p_idx) = mean(free_struct.(this_layer).(p_idx), 2);       
-    mean_params.residual.(p_idx) = mean(residual_struct.(this_layer).(p_idx), 2);       
-    mean_params.exit.(p_idx) = mean(exit_struct.(this_layer).(p_idx), 2);
+        mean_params.(layer).structural.imperm.(p_idx) = mean(struct2array(structural_struct.imperm.(layer).(p_idx)), 2);        
+        mean_params.(layer).structural.lowperm.(p_idx) = mean(struct2array(structural_struct.lowperm.(layer).(p_idx)), 2);
+        mean_params.(layer).free.(p_idx) = mean(struct2array(free_struct.(layer).(p_idx)), 2);       
+        mean_params.(layer).residual.(p_idx) = mean(struct2array(residual_struct.(layer).(p_idx)), 2);       
+        mean_params.(layer).exit.(p_idx) = mean(struct2array(exit_struct.(layer).(p_idx)), 2);
+       
+        stacked_trapping_mean = [mean_params.(layer).structural.imperm.(p_idx).'; ...
+                            mean_params.(layer).structural.lowperm.(p_idx).'; ...
+                            mean_params.(layer).residual.(p_idx).'; ...
+                            mean_params.(layer).free.(p_idx).'; ...
+                            mean_params.(layer).exit.(p_idx).'].';           
+        
+        if strcmp(layer, this_layer) % plot trapping distribution for this layer           
+            fig_mean = figure(fm);
+            figure(fm)
+            %set(fm, 'visible', 'on')
+            area(log_time, stacked_trapping_mean)
+            set(gca, 'xscale', 'log')
 
-    std_params.structural.imperm.(p_idx) = std(structural_struct.imperm.(this_layer).(p_idx), 0, 2);
-    std_params.structural.lowperm.(p_idx) = std(structural_struct.lowperm.(this_layer).(p_idx), 0, 2);
-    std_params.free.(p_idx) = std(free_struct.(this_layer).(p_idx), 0, 2);
-    std_params.residual.(p_idx) = std(residual_struct.(this_layer).(p_idx), 0, 2);
-    std_params.exit.(p_idx) = std(exit_struct.(this_layer).(p_idx), 0, 2);
+            xlim([1, log_time(end)]) % plot from 1 year to end
+            xlabel('Time step')
+            ylabel('Volume (m^3)')
+            title({sprintf('Mean trapping distribution for %d layers', n_layers), ['X: ', param_name, sprintf(' = %.2f', corr_len_x(p))], ...
+                                                                                  ['Z: ', param_name, sprintf(' = %.2f', corr_len_z(p))]})  
+            legend('Structural permanent', 'Structural temporary', ...
+                    'Residual', 'Free plume', 'Exited', 'Location', 'west')  
+            saveas(fig_mean, sprintf(strcat(plot_base_dir, '/layers_%d/mean_trapping_%s'), n_layers, p_idx), 'png'); 
 
-    fig_mean = figure(fm);
-    figure(fm)
-    stacked_trapping_mean = [mean_params.structural.imperm.(p_idx).'; ...
-                        mean_params.structural.lowperm.(p_idx).'; ...
-                        mean_params.residual.(p_idx).'; ...
-                        mean_params.free.(p_idx).'; ...
-                        mean_params.exit.(p_idx).'].';
-    %stacked_trapping = stacked_trapping * fluid.rhoOS / 1000; % mass (tonn)
+            clf; 
+        
+            this_seed = strcat('s', string(my_seed));
+            stacked_trapping = [structural_struct.imperm.(layer).(p_idx).(this_seed).'; ...
+                            structural_struct.lowperm.(layer).(p_idx).(this_seed).'; ...
+                            residual_struct.(layer).(p_idx).(this_seed).'; ...
+                            free_struct.(layer).(p_idx).(this_seed).'; ...
+                            exit_struct.(layer).(p_idx).(this_seed).'].';           
+                        
+            area(log_time, stacked_trapping)
+            set(gca, 'xscale', 'log')
 
-    mycolors = [0 0.5 1; 0.5 0 1; 0 0.5 0; 1 0.647 0; 1 0 0];
-    %mycolors = {'blue', 'cyan', 'green', 'yellow', 'red'};
-    area(log_time, stacked_trapping_mean)
-    set(gca, 'xscale', 'log')
+            xlim([1, log_time(end)]) % plot from 1 year to end
+            xlabel('Time step')
+            ylabel('Volume (m^3)')
+            title({sprintf('Trapping distribution for %d layers for seed %d', n_layers, my_seed), ['X: ', param_name, sprintf(' = %.2f', corr_len_x(p))], ...
+                                                                                  ['Z: ', param_name, sprintf(' = %.2f', corr_len_z(p))]})  
+            legend('Structural permanent', 'Structural temporary', ...
+                    'Residual', 'Free plume', 'Exited', 'Location', 'west')       
+            fm = fm + 1;
+        end
+              
+        %fs = fs + 2;
+    end
+end
 
-    xlim([1, log_time(end)]) % plot from 1 year to end
-    xlabel('Time step')
-    ylabel('Volume (m^3)')
-    title({sprintf('Mean volume distribution for %d layers', n_layers), ['X: ', param_name, sprintf(' = %.2f', corr_len_x(p))], ...
-                                                                          ['Z: ', param_name, sprintf(' = %.2f', corr_len_z(p))]})  
-    legend('Structural permanent', 'Structural temporary', ...
-            'Residual', 'Free plume', 'Exited', 'Location', 'west')  
-    saveas(fig_mean, sprintf(strcat(plot_base_dir, '/layers_%d/mean_trapping_%s'), n_layers, p_idx), 'png'); 
+%% Plot standard deviation of trapping distribution
+% Plot std of trapping mechanisms across params (for each layer)
+fs = fm+1;
 
-%         clf;
-%         this_layer = regexp(lab_layers{1}, string(n_layers), 'match');
-%         if this_layer
-%             stacked_trapping = [structural_struct.imperm.(this_layer).(p_idx).'; ...
-%                             structural_struct.lowperm.(this_layer).(p_idx).'; ...
-%                             residual_struct.(this_layer).(p_idx).'; ...
-%                             free_struct.(this_layer).(p_idx).'; ...
-%                             exit_struct.(this_layer).(p_idx).'].';           
-%            
-%             area(log_time, stacked_trapping)
-%             set(gca, 'xscale', 'log')
-% 
-%             xlim([1, log_time(end)]) % plot from 1 year to end
-%             xlabel('Time step')
-%             ylabel('Volume (m^3)')
-%             title({sprintf('Volume distribution for %d layers for this seed', n_layers), ['X: ', param_name, sprintf(' = %.2f', corr_len_x(p))], ...
-%                                                                                   ['Z: ', param_name, sprintf(' = %.2f', corr_len_z(p))]})  
-%             legend('Structural permanent', 'Structural temporary', ...
-%                     'Residual', 'Free plume', 'Exited', 'Location', 'west')  
-%         end
-
+for l=1:numel(num_layers)
     fig_std = figure(fs);
     figure(fs)
-
-    stacked_trapping_std = [std_params.structural.imperm.(p_idx).'; ...
-                        std_params.structural.lowperm.(p_idx).'; ...
-                        std_params.residual.(p_idx).'; ...
-                        std_params.free.(p_idx).'; ...
-                        std_params.exit.(p_idx).'].';
-
-    set(fs, 'visible', 'off');
+    
+    layer = used_lab(l);
+    layer = layer{1};
+    layers_int = regexp(layer, '\d+', 'match');
+    layers_int = str2double(layers_int{1});
+    
+    std_params.(layer).structural.imperm = std(struct2array(mean_params.(layer).structural.imperm), 0, 2);
+    std_params.(layer).structural.lowperm = std(struct2array(mean_params.(layer).structural.lowperm), 0, 2);
+    std_params.(layer).residual = std(struct2array(mean_params.(layer).residual), 0, 2);
+    std_params.(layer).free = std(struct2array(mean_params.(layer).free), 0, 2);
+    std_params.(layer).exit = std(struct2array(mean_params.(layer).exit), 0, 2);
+    
+    stacked_trapping_std = [std_params.(layer).structural.imperm.'; ...
+                        std_params.(layer).structural.lowperm.'; ...
+                        std_params.(layer).residual.'; ...
+                        std_params.(layer).free.'; ...
+                        std_params.(layer).exit.'].';
+                    
     area(log_time, stacked_trapping_std)
     set(gca, 'xscale', 'log')
 
     xlim([1, log_time(end)]) % plot from 1 year to end
     xlabel('Time step')
     ylabel('Volume (m^3)')
-    title({sprintf('Standard deviation of volume distribution for %d layers', n_layers), ['X: ', param_name, sprintf(' = %.2f', corr_len_x(p))], ...
-                                                                          ['Z: ', param_name, sprintf(' = %.2f', corr_len_z(p))]})  
+    title({sprintf('Standard deviation of trapping distribution for %d layers', layers_int)})  
     legend('Structural permanent', 'Structural temporary', ...
-            'Residual', 'Free plume', 'Exited', 'Location', 'west')  
-    saveas(fig_std, sprintf(strcat(plot_base_dir, '/layers_%d/std_trapping_%s'), n_layers, p_idx), 'png');        
+            'Residual', 'Free plume', 'Exited', 'Location', 'west')    
+    saveas(fig_std, sprintf(strcat(plot_base_dir, '/layers_%d/std_trapping_all_params'), layers_int), 'png');
+    
+    fs = fs + 1;
+end
 
-    fm = fm + 2;
-    fs = fs + 2;
-end         
+% Plot std for each param across layers
 
+for p=1:numel(params)
+    p_idx = strcat('p', string(find(params == params(p))));
+    mean_pX = struct('residual', 0, 'free', 0, 'exit', 0);  
+    mean_pX.structural.imperm = 0;
+    mean_pX.structural.lowperm = 0;
+    
+    for l=1:num_layers
+        layer = used_lab(l);
+        layer = layer{1};
+        mean_pX.structural.imperm = mean_pX.structural.imperm + mean_params.(layer).structural.imperm.(p_idx);
+        mean_pX.structural.lowperm = mean_pX.structural.lowperm + mean_params.(layer).structural.lowperm.(p_idx);
+        mean_pX.residual = mean_pX.residual + mean_params.(layer).residual.(p_idx);
+        mean_pX.free = mean_pX.free + mean_params.(layer).free.(p_idx);
+        mean_pX.exit = mean_pX.exit + mean_params.(layer).exit.(p_idx);
+    end
+    
+    mean_pX.structural.imperm = mean_pX.structural.imperm / num_layers;
+    mean_pX.structural.lowperm = mean_pX.structural.lowperm / num_layers;      
+    mean_pX.residual = mean_pX.residual / num_layers;
+    mean_pX.free = mean_pX.free / num_layers;
+    mean_pX.exit = mean_pX.exit / num_layers;
+    
+    std_layers.(p_idx).structural.imperm = 0;
+    std_layers.(p_idx).structural.lowperm = 0;
+    std_layers.(p_idx).residual = 0;
+    std_layers.(p_idx).free = 0;
+    std_layers.(p_idx).exit = 0;
+    
+    for l=1:num_layers    
+        std_layers.(p_idx).structural.imperm = std_layers.(p_idx).structural.imperm + ...
+                                                (mean_params.(layer).structural.imperm.(p_idx) - mean_pX.structural.imperm).^2;
+        std_layers.(p_idx).structural.lowperm = std_layers.(p_idx).structural.lowperm + ...
+                                                (mean_params.(layer).structural.lowperm.(p_idx) - mean_pX.structural.lowperm).^2;
+        std_layers.(p_idx).residual = std_layers.(p_idx).residual + ...
+                                                (mean_params.(layer).residual.(p_idx) - mean_pX.residual).^2;
+        std_layers.(p_idx).free = std_layers.(p_idx).free + ...
+                                                (mean_params.(layer).free.(p_idx) - mean_pX.free).^2;
+        std_layers.(p_idx).exit = std_layers.(p_idx).exit + ...
+                                                (mean_params.(layer).exit.(p_idx) - mean_pX.exit).^2;
+            
+    end
+    
+    std_layers.(p_idx).structural.imperm = sqrt(std_layers.(p_idx).structural.imperm / num_layers);
+    std_layers.(p_idx).structural.lowperm = sqrt(std_layers.(p_idx).structural.lowperm / num_layers);
+    std_layers.(p_idx).residual = sqrt(std_layers.(p_idx).residual / num_layers);
+    std_layers.(p_idx).free = sqrt(std_layers.(p_idx).free / num_layers);
+    std_layers.(p_idx).exit = sqrt(std_layers.(p_idx).exit / num_layers);       
+    
+    stacked_trapping_std = [std_layers.(p_idx).structural.imperm.'; ...
+                        std_layers.(p_idx).structural.lowperm.'; ...
+                        std_layers.(p_idx).residual.'; ...
+                        std_layers.(p_idx).free.'; ...
+                        std_layers.(p_idx).exit.'].';
+    
+    fig_std = figure(fs+1);
+    figure(fs+1)
+    
+    area(log_time, stacked_trapping_std)
+    set(gca, 'xscale', 'log')
+
+    xlim([1, log_time(end)]) % plot from 1 year to end
+    xlabel('Time step')
+    ylabel('Volume (m^3)')
+    title({'Standard deviation of trapping distribution across layers.', sprintf('Param: %s', p_idx)})  
+    legend('Structural permanent', 'Structural temporary', ...
+            'Residual', 'Free plume', 'Exited', 'Location', 'west')    
+    saveas(fig_std, sprintf(strcat(plot_base_dir, '/std_trapping_%s'), p_idx), 'png');
+
+    fs = fs + 1;
+end
 %% TESTING
 
 %% Functions
