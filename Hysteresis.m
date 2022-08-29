@@ -2,7 +2,7 @@ classdef Hysteresis
     %HYSTERESIS To include hysteresis effects for CO2 drainage and water
     %imbibition
     
-    methods
+    methods (Static)
         function [krn] = Hysteresis(Sn, Sm1, Sm2, swr, snr, lambda)
           % Compute next relative permeability curves given current
           % drainage + imbibition curves.
@@ -20,7 +20,7 @@ classdef Hysteresis
           %     krn: new relperm curve (for each cell in grid)
           Sw = 1 - Sn;
           if any(Sw > 1-snr) % only possible for at first displacement => we are at primary drainage
-              Sw_scaled = (Sw - swr)/(1 - swr);
+              Sw_scaled = (Sw - swr)/(1 - swr);s
           else
               Sw_scaled = (Sw - swr)/(1 - snr - swr); % all subsequent drainage/imbibition
           end
@@ -44,8 +44,34 @@ classdef Hysteresis
           % primary drainage curve
           S_nr = 1 / (C + 1/S_ni);
           krn = krn_D(S_ni)*((S - S_nr)/(S_ni - S_nr)).^lambda; % new imbibition curve (equals subsequent drainage curve)          
-      end          
+        end
+        
+        function [krI] = ParamInterp(krD, Sn, sni, snr, lambda)
+            % Unique imbibition curve based on historical max saturation  
+            krI = krD(sni).*((Sn-snr)./(sni-snr)).^lambda;
+        end
+      
+        function [krn] = KilloughOld(Sn, Sni, Sni_max, Snr_max, lambda, krn_PD)             
+            C = 1/Snr_max - 1/Sni_max;
+            S_nr = Sni ./ (C*Sni + 1);           
+            % Parametric interpolation:
+            krn = krn_PD(Sni).*((Sn-S_nr)./(Sni-S_nr)).^lambda;
+            krn(Sn < S_nr) = 0.0; % all CO2 up to residual sat is immoilized
+            krn(Sni < 1e-3) = 0.0; % all cells with no CO2 history forced immobilized           
+        end
+        
+        function [krn] = Killough(Sn, Sni, Sni_max, Snr_max, krn_PD, krn_PI)             
+            C = 1/Snr_max - 1/Sni_max; % assuming zero residual sat for primary drainage curve
+            S_nr = Sni ./ (C*Sni + 1);          
+            Sn_dot = Snr_max + ((Sn-S_nr).*(Sni_max-Snr_max))./(Sni-S_nr);
+            % New imbibition curve
+            krn = krn_PI(Sn_dot).*krn_PD(Sni)./krn_PD(Sni_max);  
+            krn(Sni < 1e-3) = 0.0; % all cells with no CO2 history forced immobilized 
+        end 
           
+        function [krn] = sTest(Sn, lambda)            
+            krn = 0.5*Sn.^lambda;
+        end
     end
 end
 

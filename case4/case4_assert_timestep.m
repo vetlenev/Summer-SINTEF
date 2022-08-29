@@ -470,4 +470,3 @@ title({'Comparison of different number of time steps.', ...
 saveas(fig_time, strcat(plot_dir, '/assert_timestep'), 'png');
 
 %% TESTING
-

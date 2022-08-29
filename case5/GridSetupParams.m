@@ -23,6 +23,7 @@ classdef GridSetupParams < handle
         Perm
         lowperm
         baseperm
+        nCuts
     end
     
     methods
@@ -48,6 +49,8 @@ classdef GridSetupParams < handle
                 o.lowperm = perms{1};
                 o.baseperm = perms{2};
                 o.Perm = repmat(o.baseperm, [o.G.cells.num 1]);
+                
+                o.nCuts = 2; % use 2 for 13 layer, 3 for 26 layers, 4 for 40 layers
             end
         end
         
@@ -147,8 +150,8 @@ classdef GridSetupParams < handle
                                                     o.Z > o.zStart.(layer_type)(i) & ...
                                                     o.Z < o.zStop.(layer_type)(i));
                                                 
-                        [hole_min, hole_max] = deal(0.05, 0.15); % min/max length of vertical extent
-                        line_cells = UtilFunctions.cutLayer(o, line_cells, hole_min, hole_max, layer_type, i);
+                        [hole_min, hole_max] = deal(0.04, 0.10); % min/max length of vertical extent
+                        line_cells = UtilFunctions.cutLayer(o, line_cells, hole_min, hole_max, layer_type, i, o.nCuts);
                         
                     else
                         line_cells = o.G.cells.indexMap(o.X >= o.xStart.(layer_type)(i) & ...

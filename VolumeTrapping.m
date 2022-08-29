@@ -50,29 +50,6 @@ classdef VolumeTrapping
           res_vol = sum(G.cells.volumes.*S_res)*mean(rock.poro);%*fluid.rhoOS;
       end
       
-      function [struct_vol] = Co2StructuralTrappedOld(G, S, swr, sor, trapped_cells, rock)
-          % Estimates volume of CO2 structurally trapped in domain, defined
-          % as all cells residing below concave shape but above bottommost
-          % part of layer, including cells immediately below layer.
-          % 
-          % Inputs:
-          %     G: grid object         
-          %     S: CO2 saturation values for each cell in grid at current state
-          %     swr: residual water saturation
-          %     sor: residual oil saturation   
-          %     trapped_cells: cell candidates for structral trapping
-          %     rock: rock object         
-          % Outputs:
-          %    struct_vol: structural trapped volume of CO2
-          
-          also_trapped = find(S > 1-(swr+0.001)); % assume all cells fully saturated with CO2 (with small buffer) is structurally trapped
-          % SHOULD FULLY SATURATED CELLS ALSO BE COUNTED AS TRAPPED ???
-          %non_trapped_cells = G.cells.indexMap(setdiff(G.cells.indexMap, union(also_trapped, trapped_cells)));
-          non_trapped_cells = G.cells.indexMap(setdiff(G.cells.indexMap, trapped_cells));
-          S(non_trapped_cells) = 0; % omit cells not candidated for structural trapping
-          S_struct = max(S-sor, 0); % omit residually trapped CO2
-          struct_vol = sum(G.cells.volumes.*S_struct)*mean(rock.poro);                       
-      end
       
       function [struct_imperm, struct_lowperm, ...
                 struct_res_imperm, struct_res_lowperm] = Co2StructuralTrapped(G, S, sor, trapped_imperm, trapped_lowperm, rock)
